@@ -1,6 +1,7 @@
 import { chromium } from "playwright-core";
 import { resolve } from "node:path";
 import { importMarks } from "./db.js";
+import { getAcuttisCredentials } from "./acuttis-credentials.js";
 
 const SIGNIN = "https://app.acuttis.com.br/signin";
 const API = "https://app-back.acuttis.com.br/v1/marks/list";
@@ -20,6 +21,7 @@ let lastSync;
 let lastError;
 let autoTimer;
 let connectTask;
+let loginTask;
 let fetchTask;
 
 function watch(tab) {
@@ -67,9 +69,50 @@ async function tryOpenReceipts() {
   }
 }
 
+async function loginWithSavedCredentials() {
+  let credentials;
+  try {
+    credentials = getAcuttisCredentials();
+  } catch (error) {
+    lastError = error.message;
+    return false;
+  }
+  if (!credentials || !page || page.isClosed()) return false;
+  try {
+    const currentUrl = new URL(page.url());
+    if (currentUrl.origin !== new URL(SIGNIN).origin || !/^\/signin(?:\/|$)/i.test(currentUrl.pathname)) return false;
+    const password = page.locator('input[type="password"]:visible').first();
+    await password.waitFor({ state: "visible", timeout: 8000 });
+    const username = page.locator('input:visible:not([type="password"]):not([type="hidden"]):not([type="checkbox"]):not([type="submit"]):not([type="button"])').first();
+    await username.waitFor({ state: "visible", timeout: 3000 });
+    await username.fill(credentials.username);
+    await password.fill(credentials.password);
+    const submit = page.locator('button[type="submit"]:visible, input[type="submit"]:visible').first();
+    const namedSubmit = page.getByRole("button", { name: /entrar|login|acessar|continuar/i }).first();
+    if (await submit.count()) await submit.click({ timeout: 5000 });
+    else if (await namedSubmit.count()) await namedSubmit.click({ timeout: 5000 });
+    else await password.press("Enter");
+    lastError = null;
+    return true;
+  } catch {
+    // Se o formulário tiver uma estrutura diferente, deixe a janela aberta para o login manual.
+    return false;
+  }
+}
+
+function attemptSavedCredentialsLogin() {
+  if (!loginTask) {
+    loginTask = loginWithSavedCredentials().finally(() => {
+      loginTask = null;
+    });
+  }
+  return loginTask;
+}
+
 function startConnection() {
   if (connectTask || requestHeaders || !page) return;
   connectTask = (async () => {
+    await attemptSavedCredentialsLogin();
     await tryOpenReceipts();
     if (!requestHeaders)
       throw new Error(
@@ -90,6 +133,7 @@ export async function openBrowser() {
       page = context.pages()[0] || (await context.newPage());
       await page.goto(SIGNIN, { waitUntil: "domcontentloaded" });
     }
+    void attemptSavedCredentialsLogin();
     startConnection();
     return { opened: true, connecting: !!connectTask };
   }

@@ -5,6 +5,7 @@ import { db, importMarks, saveSetting } from './db.js';
 import { dashboard } from './dashboard.js';
 import { localDate, minutes, shiftTargetForDayOff, weekday } from './calc.js';
 import { openBrowser, syncMarks, syncStatus } from './acuttis.js';
+import { deleteAcuttisCredentials, getAcuttisCredentials, saveAcuttisCredentials } from './acuttis-credentials.js';
 
 const port = Number(process.env.PORT || 3000);
 const publicRoot = resolve('public');
@@ -31,6 +32,25 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'POST' && url.pathname === '/api/acuttis/open') return json(res, 200, await openBrowser());
       if (req.method === 'POST' && url.pathname === '/api/acuttis/sync') return json(res, 200, await syncMarks(localDate().slice(0, 7) + '-01'));
+      if (req.method === 'GET' && url.pathname === '/api/acuttis/credentials') {
+        const credentials = getAcuttisCredentials();
+        return json(res, 200, { configured: !!credentials, username: credentials?.username || '' });
+      }
+      if (req.method === 'PUT' && url.pathname === '/api/acuttis/credentials') {
+        const input = await body(req);
+        const username = typeof input.username === 'string' ? input.username.trim() : '';
+        const oldCredentials = getAcuttisCredentials();
+        const password = typeof input.password === 'string' && input.password ? input.password : oldCredentials?.password;
+        if (!username || username.length > 255 || typeof password !== 'string' || !password || password.length > 1024) {
+          throw Object.assign(new Error('Informe um usuário e uma senha válida.'), { status: 400 });
+        }
+        saveAcuttisCredentials(username, password);
+        return json(res, 200, { configured: true, username });
+      }
+      if (req.method === 'DELETE' && url.pathname === '/api/acuttis/credentials') {
+        deleteAcuttisCredentials();
+        return json(res, 200, { configured: false });
+      }
       if (req.method === 'POST' && url.pathname === '/api/import') return json(res, 200, importMarks(await body(req)));
       if (req.method === 'POST' && url.pathname === '/api/shifts') {
         const input = await body(req);

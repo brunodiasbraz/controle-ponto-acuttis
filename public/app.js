@@ -29,8 +29,12 @@ function readAppearance() {
   try {
     const saved = JSON.parse(localStorage.getItem(appearanceKey) || "{}");
     return {
-      theme: ["system", "light", "dark"].includes(saved.theme) ? saved.theme : "system",
-      primary: /^#[0-9a-f]{6}$/i.test(saved.primary || "") ? saved.primary : defaultAppearance.primary,
+      theme: ["system", "light", "dark"].includes(saved.theme)
+        ? saved.theme
+        : "system",
+      primary: /^#[0-9a-f]{6}$/i.test(saved.primary || "")
+        ? saved.primary
+        : defaultAppearance.primary,
     };
   } catch {
     return { ...defaultAppearance };
@@ -38,15 +42,20 @@ function readAppearance() {
 }
 function applyAppearance() {
   const appearance = readAppearance();
-  const resolvedTheme = appearance.theme === "system"
-    ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
-    : appearance.theme;
+  const resolvedTheme =
+    appearance.theme === "system"
+      ? matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light"
+      : appearance.theme;
   const root = document.documentElement;
   root.dataset.theme = resolvedTheme;
   root.dataset.bsTheme = resolvedTheme;
   root.style.setProperty("--blue", appearance.primary);
   root.style.setProperty("--primary-color", appearance.primary);
-  const rgb = appearance.primary.match(/[\da-f]{2}/gi).map((part) => Number.parseInt(part, 16));
+  const rgb = appearance.primary
+    .match(/[\da-f]{2}/gi)
+    .map((part) => Number.parseInt(part, 16));
   root.style.setProperty("--bs-primary", appearance.primary);
   root.style.setProperty("--bs-primary-rgb", rgb.join(", "));
   $("#theme-choice").value = appearance.theme;
@@ -131,14 +140,14 @@ function render(data) {
   const s = data.summary;
   $("#summary").innerHTML =
     metric(
-      "Trabalhadas no mês",
-      fmt(s.worked),
-      `${s.markCount} batimentos importados`,
-    ) +
-    metric(
       "Jornada do mês",
       fmt(s.monthTarget),
       `Dias fechados até hoje: ${fmt(s.expected)}`,
+    ) +
+    metric(
+      "Trabalhadas no mês",
+      fmt(s.worked),
+      `${s.markCount} batimentos importados`,
     ) +
     metric(
       "Saldo da semana",
@@ -227,35 +236,95 @@ $("#month").addEventListener("change", refresh);
 $("#open-settings").addEventListener("click", () => {
   applyAppearance();
   $("#settings-dialog").showModal();
+  loadAcuttisCredentials();
 });
 function selectSettingsTab(tab) {
-  const appearance = tab === "appearance";
-  $("#tab-work").classList.toggle("active", !appearance);
-  $("#tab-work").setAttribute("aria-selected", String(!appearance));
-  $("#tab-appearance").classList.toggle("active", appearance);
-  $("#tab-appearance").setAttribute("aria-selected", String(appearance));
-  $("#panel-work").hidden = appearance;
-  $("#panel-work").classList.toggle("active", !appearance);
-  $("#panel-appearance").hidden = !appearance;
-  $("#panel-appearance").classList.toggle("active", appearance);
+  for (const name of ["work", "appearance", "acuttis"]) {
+    const selected = name === tab;
+    $(`#tab-${name}`).classList.toggle("active", selected);
+    $(`#tab-${name}`).setAttribute("aria-selected", String(selected));
+    $(`#panel-${name}`).hidden = !selected;
+    $(`#panel-${name}`).classList.toggle("active", selected);
+  }
 }
 $("#tab-work").addEventListener("click", () => selectSettingsTab("work"));
-$("#tab-appearance").addEventListener("click", () => selectSettingsTab("appearance"));
+$("#tab-appearance").addEventListener("click", () =>
+  selectSettingsTab("appearance"),
+);
+$("#tab-acuttis").addEventListener("click", () => selectSettingsTab("acuttis"));
 $(".settings-tabs").addEventListener("keydown", (event) => {
-  const tabs = [$("#tab-work"), $("#tab-appearance")];
+  const tabs = [$("#tab-work"), $("#tab-appearance"), $("#tab-acuttis")];
   const current = tabs.indexOf(document.activeElement);
   if (current < 0) return;
-  const next = event.key === "ArrowRight" ? (current + 1) % tabs.length
-    : event.key === "ArrowLeft" ? (current + tabs.length - 1) % tabs.length
-      : event.key === "Home" ? 0
-        : event.key === "End" ? tabs.length - 1 : -1;
+  const next =
+    event.key === "ArrowRight"
+      ? (current + 1) % tabs.length
+      : event.key === "ArrowLeft"
+        ? (current + tabs.length - 1) % tabs.length
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? tabs.length - 1
+            : -1;
   if (next < 0) return;
   event.preventDefault();
   tabs[next].focus();
   tabs[next].click();
 });
-$("#theme-choice").addEventListener("change", (event) => saveAppearance({ theme: event.target.value }));
-$("#primary-color").addEventListener("input", (event) => saveAppearance({ primary: event.target.value }));
+$("#theme-choice").addEventListener("change", (event) =>
+  saveAppearance({ theme: event.target.value }),
+);
+$("#primary-color").addEventListener("input", (event) =>
+  saveAppearance({ primary: event.target.value }),
+);
+async function loadAcuttisCredentials() {
+  try {
+    const value = await api("/api/acuttis/credentials");
+    $("#acuttis-username").value = value.username;
+    $("#acuttis-password").value = "";
+    $("#credentials-status").textContent = value.configured
+      ? `Acesso salvo para ${value.username}. A senha permanece protegida no servidor.`
+      : "Nenhum acesso salvo. Informe suas credenciais para habilitar o login automático.";
+    $("#delete-acuttis-credentials").hidden = !value.configured;
+  } catch (error) {
+    $("#credentials-status").textContent = error.message;
+  }
+}
+$("#save-acuttis-credentials").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    const result = await api("/api/acuttis/credentials", {
+      method: "PUT",
+      body: JSON.stringify({ username: $("#acuttis-username").value, password: $("#acuttis-password").value }),
+    });
+    $("#acuttis-password").value = "";
+    $("#credentials-status").textContent = `Acesso salvo para ${result.username}. A senha permanece protegida no servidor.`;
+    $("#delete-acuttis-credentials").hidden = false;
+    message("Credenciais do Acuttis salvas com criptografia.", "success");
+  }),
+);
+$("#acuttis-username").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    $("#acuttis-password").focus();
+  }
+});
+$("#acuttis-password").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    $("#save-acuttis-credentials").click();
+  }
+});
+$("#delete-acuttis-credentials").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    if (!confirm("Remover as credenciais do Acuttis salvas neste aplicativo?")) return;
+    await api("/api/acuttis/credentials", { method: "DELETE" });
+    $("#acuttis-username").value = "";
+    $("#acuttis-password").value = "";
+    $("#credentials-status").textContent = "Nenhum acesso salvo. Informe suas credenciais para habilitar o login automático.";
+    $("#delete-acuttis-credentials").hidden = true;
+    message("Credenciais do Acuttis removidas.", "success");
+  }),
+);
 $("#open-acuttis").addEventListener("click", () =>
   $("#acuttis-dialog").showModal(),
 );
@@ -270,7 +339,7 @@ $("#start-connection").addEventListener("click", (event) =>
   action(event.currentTarget, async () => {
     await api("/api/acuttis/open", { method: "POST" });
     $("#connection-status").textContent =
-      "Faça login no Chrome aberto. O painel sincronizará os batimentos assim que a sessão estiver pronta.";
+      "Se houver credenciais salvas, o login será preenchido automaticamente. Conclua eventual MFA ou CAPTCHA na janela aberta; depois a sincronização começa.";
     await refresh();
   }),
 );

@@ -17,11 +17,13 @@ O ícone de configurações abre as preferências de jornada e a aba **Aparênci
 
 ## Sincronizar com o Acuttis
 
-1. Clique em **Conectar Acuttis** e depois em **Abrir login**. O aplicativo abre um perfil próprio do Chrome.
-2. Faça login na página oficial do Acuttis. Quando o comprovante de ponto aparecer, o aplicativo o abre e sincroniza os batimentos automaticamente. Se o site exigir MFA ou CAPTCHA, conclua essa etapa no Chrome.
+1. Em **Configurações → Acesso ao Acuttis**, salve seu usuário e senha. Depois clique em **Conectar Acuttis** e em **Abrir Acuttis**. O aplicativo abre um perfil próprio do Chromium.
+2. Se as credenciais estiverem salvas, o aplicativo envia o formulário oficial de login. Se o site exigir MFA ou CAPTCHA, conclua essa etapa na janela do Chromium. Quando o comprovante aparecer, os batimentos serão sincronizados automaticamente.
 3. O aplicativo busca páginas de 20 batimentos até o início do mês atual e repete a busca a cada cinco minutos enquanto o servidor estiver aberto.
 
-O login em iframe não disponibiliza a sessão ao backend local, por causa da separação de origem dos navegadores. Por isso, o aplicativo usa uma janela do Chrome controlada pelo próprio monolito. Nenhuma senha ou CPF é salva no SQLite; o perfil do Chrome guarda a sessão conforme o próprio navegador. A integração usa o endpoint observado na plataforma; se a interface ou o formato da API mudar, ajuste `src/acuttis.js`.
+O login em iframe não disponibiliza a sessão ao backend local, por causa da separação de origem dos navegadores. Por isso, o aplicativo usa uma janela do Chromium controlada pelo próprio monolito. Em **Configurações → Acesso ao Acuttis**, é possível salvar usuário e senha; ao abrir a janela, o aplicativo preenche e envia o formulário oficial do Acuttis e sincroniza os batimentos quando a sessão estiver pronta. MFA e CAPTCHA precisam ser concluídos manualmente.
+
+A senha é cifrada com AES-256-GCM antes de ser gravada na tabela `settings` do SQLite. A chave de 32 bytes é gerada localmente em `~/.config/controle-ponto-acuttis/credential.key` (ou `$XDG_CONFIG_HOME/controle-ponto-acuttis/credential.key`) com permissão restrita, fora do banco e do repositório. Faça backup dessa chave junto com o banco; sem ela, as credenciais salvas não podem ser recuperadas. A criptografia protege os dados do arquivo de banco isolado, mas qualquer pessoa com acesso à conta do sistema que execute o aplicativo também pode ler essa chave. Nenhuma senha é devolvida pela API nem escrita nos logs. A integração usa o endpoint observado na plataforma; se a interface ou o formato da API mudar, ajuste `src/acuttis.js`.
 
 ## Plantões
 

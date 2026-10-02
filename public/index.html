@@ -201,6 +201,7 @@
         <div class="settings-tabs" role="tablist" aria-label="Seções de configuração">
           <button id="tab-work" class="settings-tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-work">Minha jornada</button>
           <button id="tab-appearance" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-appearance">Aparência</button>
+          <button id="tab-acuttis" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-acuttis">Acesso ao Acuttis</button>
         </div>
         <section id="panel-work" class="settings-panel active" role="tabpanel" aria-labelledby="tab-work">
         <div class="mb-3 mt-3">
@@ -261,6 +262,23 @@
               <span id="primary-color-value" class="small text-secondary">#2267A5</span>
             </div>
             <div class="form-text">A cor é aplicada imediatamente e salva neste navegador.</div>
+          </div>
+        </section>
+        <section id="panel-acuttis" class="settings-panel" role="tabpanel" aria-labelledby="tab-acuttis" hidden>
+          <p id="credentials-status" class="small text-secondary mt-3 mb-3" aria-live="polite">Carregando configuração de acesso…</p>
+          <div class="mb-3">
+            <label for="acuttis-username" class="form-label">Usuário</label>
+            <input id="acuttis-username" class="form-control" type="text" autocomplete="username" maxlength="255" />
+          </div>
+          <div class="mb-3">
+            <label for="acuttis-password" class="form-label">Senha</label>
+            <input id="acuttis-password" class="form-control" type="password" autocomplete="new-password" maxlength="1024" />
+            <div class="form-text">A senha nunca é devolvida à tela. Deixe em branco para manter a senha já salva.</div>
+          </div>
+          <div class="small text-secondary mb-3">Ao abrir o Acuttis, o sistema preencherá e enviará o formulário de login. Se houver MFA ou CAPTCHA, conclua essa etapa na janela do Chromium.</div>
+          <div class="d-flex flex-wrap gap-2">
+            <button id="save-acuttis-credentials" class="btn btn-primary" type="button">Salvar acesso</button>
+            <button id="delete-acuttis-credentials" class="btn btn-outline-danger" type="button" hidden>Remover acesso salvo</button>
           </div>
         </section>
       </form>
@@ -348,9 +366,10 @@
           <button class="btn-close" value="cancel" aria-label="Fechar"></button>
         </div>
         <p class="text-secondary mt-3">
-          O login abre em uma janela do Chrome controlada pelo aplicativo. Faça
-          o login nela; quando o comprovante de ponto estiver disponível, os
-          batimentos serão sincronizados automaticamente.
+          O login abre em uma janela do Chromium controlada pelo aplicativo.
+          Com credenciais salvas, o sistema preencherá e enviará o formulário;
+          quando o comprovante de ponto aparecer, os batimentos serão
+          sincronizados automaticamente.
         </p>
         <p class="small text-secondary">
           Um iframe do Acuttis ficaria em outra origem: o painel não conseguiria
@@ -358,7 +377,7 @@
         </p>
         <div class="d-flex gap-2">
           <button id="start-connection" type="button" class="btn btn-primary">
-            Abrir login</button
+            Abrir Acuttis</button
           ><button class="btn btn-outline-secondary" value="cancel">
             Fechar
           </button>
