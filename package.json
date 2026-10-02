@@ -1,0 +1,15 @@
+{
+  "name": "controle-de-ponto",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "import": "node src/import.js",
+    "test": "node test/ponto.test.js"
+  },
+  "dependencies": {
+    "playwright-core": "^1.63.0"
+  }
+}

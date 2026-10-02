@@ -1,0 +1,374 @@
+const $ = (selector) => document.querySelector(selector);
+let state;
+let selectedDate;
+const names = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+const escapeHtml = (text) =>
+  String(text ?? "").replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
+  );
+const fmt = (n) =>
+  `${n < 0 ? "−" : ""}${String(Math.floor(Math.abs(n) / 60)).padStart(2, "0")}:${String(Math.abs(n) % 60).padStart(2, "0")}`;
+const dateLabel = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+const fullDate = (iso) => `${dateLabel(iso)}/${iso.slice(0, 4)}`;
+const balanceClass = (n) => (n > 0 ? "positive" : n < 0 ? "negative" : "");
+const today = new Intl.DateTimeFormat("sv-SE", {
+  timeZone: "America/Sao_Paulo",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+}).format(new Date());
+$("#month").value = today.slice(0, 7);
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+  });
+  const value = await response.json();
+  if (!response.ok)
+    throw new Error(value.error || "Não foi possível concluir a operação.");
+  return value;
+}
+function message(text, type = "info") {
+  const container = $("#toast-container");
+  const toast = document.createElement("div");
+  const kind =
+    type === "danger" || type === "error"
+      ? "error"
+      : type === "success"
+        ? "success"
+        : "info";
+  const icon = document.createElement("span");
+  icon.className = "toast-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = kind === "success" ? "✓" : kind === "error" ? "!" : "i";
+  const content = document.createElement("span");
+  content.className = "toast-message";
+  content.textContent = text;
+  const close = document.createElement("button");
+  close.className = "toast-close";
+  close.type = "button";
+  close.setAttribute("aria-label", "Fechar aviso");
+  close.textContent = "×";
+  toast.className = `app-toast toast-${kind}`;
+  toast.setAttribute("role", kind === "error" ? "alert" : "status");
+  toast.append(icon, content, close);
+  container.append(toast);
+  while (container.children.length > 4) container.firstElementChild.remove();
+  let timer;
+  const dismiss = () => {
+    clearTimeout(timer);
+    toast.classList.add("toast-leaving");
+    setTimeout(() => toast.remove(), 220);
+  };
+  close.addEventListener("click", dismiss);
+  timer = setTimeout(dismiss, 4500);
+}
+function metric(label, value, hint, css = "") {
+  return `<div class="col-6 col-lg-3"><div class="card border-0 shadow-sm h-100"><div class="card-body p-3 p-lg-4"><div class="metric-label">${label}</div><div class="metric ${css} mt-2">${value}</div><div class="metric-hint mt-2">${hint}</div></div></div></div>`;
+}
+function projection(title, item, note) {
+  if (!item)
+    return `<div class="col-lg-6"><div class="card border-0 shadow-sm h-100"><div class="card-body p-4"><div class="metric-label">${title}</div><p class="text-secondary mb-0 mt-3">Fechamento fora do mês selecionado.</p></div></div></div>`;
+  const alert = item.missing.length
+    ? `<div class="small negative mt-2">Faltam batimentos em ${item.missing.map(dateLabel).join(", ")}. Previsão suspensa.</div>`
+    : "";
+  const assumption = item.assumedDates.length
+    ? `<div class="small text-secondary mt-2">${item.assumedDates.length} dia(s) útil(eis) futuros projetados pela jornada prevista, com compensação nas sextas.</div>`
+    : "";
+  const output = item.dayOff ? "Folga" : item.exit || "—";
+  const detail = item.dayOff
+    ? `Sem jornada neste dia · saldo anterior: <strong>${fmt(item.balanceBefore)}</strong>`
+    : `${note} · Trabalho necessário: <strong>${fmt(item.requiredWork)}</strong>`;
+  return `<div class="col-lg-6"><div class="card border-0 shadow-sm h-100"><div class="card-body p-4"><div class="d-flex justify-content-between align-items-start"><div class="metric-label">${title}</div><span class="badge badge-soft">${dateLabel(item.date)}</span></div><div class="projection-value mt-2">${output}</div><div class="small text-secondary">${detail}</div>${alert}${assumption}</div></div></div>`;
+}
+function render(data) {
+  state = data;
+  const s = data.summary;
+  $("#summary").innerHTML =
+    metric(
+      "Trabalhadas no mês",
+      fmt(s.worked),
+      `${s.markCount} batimentos importados`,
+    ) +
+    metric(
+      "Jornada do mês",
+      fmt(s.monthTarget),
+      `Dias fechados até hoje: ${fmt(s.expected)}`,
+    ) +
+    metric(
+      "Saldo da semana",
+      fmt(s.weekBalance),
+      "Apenas dias fechados",
+      balanceClass(s.weekBalance),
+    ) +
+    metric(
+      "Saldo do mês",
+      fmt(s.balance),
+      s.missingDates.length
+        ? `${s.missingDates.length} dia(s) com marcações incompletas`
+        : "Apenas dias fechados",
+      balanceClass(s.balance),
+    );
+  $("#projections").innerHTML =
+    projection(
+      "Saída na sexta-feira",
+      data.projections.friday,
+      "Zerar saldo da semana",
+    ) +
+    projection(
+      "Saída no último dia útil do mês",
+      data.projections.monthEnd,
+      "Zerar saldo mensal",
+    );
+  $("#shifts").innerHTML = data.shifts.length
+    ? data.shifts
+        .map(
+          (shift) =>
+            `<div class="d-flex justify-content-between align-items-center gap-3 border-top py-3"><div><strong>Plantão ${fullDate(shift.duty_date)}</strong> <span class="badge badge-soft ms-1">${fmt(shift.duty_target_minutes)}</span><div class="small text-secondary">Folga prevista: ${fullDate(shift.day_off_date)}</div></div><button class="btn btn-sm btn-outline-danger remove-shift" data-id="${shift.id}" type="button">Excluir</button></div>`,
+        )
+        .join("")
+    : '<p class="text-secondary small mb-0 mt-2">Nenhum plantão provisionado neste mês.</p>';
+  $("#days").innerHTML = data.days
+    .map((day) => {
+      const dow = names[new Date(`${day.date}T12:00:00Z`).getUTCDay()];
+      const isFuture = day.date > data.today;
+      const partial =
+        day.date === data.today && day.target > 0 && !day.complete;
+      const badge =
+        day.shiftKind === "duty"
+          ? '<span class="badge badge-soft mx-3">Plantão</span>'
+          : partial
+            ? '<span class="badge text-bg-primary mx-3">Em aberto</span>'
+            : "";
+      return `<tr data-date="${day.date}" class="${day.date === data.today ? "today" : ""}"><td><strong>${dateLabel(day.date)}</strong> <span class="text-secondary">${dow}</span>${badge}</td><td>${fmt(day.target)}</td><td>${day.marks.length ? day.marks.map((time) => `<span class="punch">${time}</span>`).join("") : '<span class="text-secondary">—</span>'}</td><td>${isFuture ? "—" : fmt(day.worked)}</td><td class="${!isFuture && !partial ? balanceClass(day.balance) : ""}">${isFuture || partial || day.marks.length === 0 ? "—" : fmt(day.balance)}</td><td class="text-secondary">${escapeHtml(day.note)}</td></tr>`;
+    })
+    .join("");
+  $("#sync-status").textContent = data.sync.lastError
+    ? `Acuttis: ${data.sync.lastError}`
+    : data.sync.connecting
+      ? "Aguardando login no Chrome para sincronizar…"
+      : data.sync.lastSync
+        ? `Última sincronização: ${new Date(data.sync.lastSync).toLocaleString("pt-BR")} · automática a cada 5 min`
+        : "Ainda não sincronizado com o Acuttis";
+  if (!$("#settings-dialog").open) {
+    $("#planned-start").value =
+      `${String(Math.floor(data.settings.plannedStart / 60)).padStart(2, "0")}:${String(data.settings.plannedStart % 60).padStart(2, "0")}`;
+    $("#break").value = data.settings.breakMinutes;
+    $("#tolerance").value = data.settings.tolerance;
+  }
+}
+async function refresh() {
+  try {
+    render(
+      await api(
+        `/api/dashboard?month=${encodeURIComponent($("#month").value)}`,
+      ),
+    );
+  } catch (error) {
+    message(error.message, "danger");
+  }
+}
+async function action(button, fn) {
+  button.disabled = true;
+  try {
+    await fn();
+  } catch (error) {
+    message(error.message, "danger");
+  } finally {
+    button.disabled = false;
+  }
+}
+$("#month").addEventListener("change", refresh);
+$("#open-settings").addEventListener("click", () =>
+  $("#settings-dialog").showModal(),
+);
+$("#open-acuttis").addEventListener("click", () =>
+  $("#acuttis-dialog").showModal(),
+);
+document
+  .querySelectorAll("[data-close-dialog]")
+  .forEach((button) =>
+    button.addEventListener("click", () =>
+      document.getElementById(button.dataset.closeDialog).close(),
+    ),
+  );
+$("#start-connection").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    await api("/api/acuttis/open", { method: "POST" });
+    $("#connection-status").textContent =
+      "Faça login no Chrome aberto. O painel sincronizará os batimentos assim que a sessão estiver pronta.";
+    await refresh();
+  }),
+);
+$("#sync").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    const result = await api("/api/acuttis/sync", { method: "POST" });
+    message(
+      result.pending
+        ? "Aguardando login no Chrome. A sincronização continuará automaticamente."
+        : `${result.added} marcação(ões) nova(s) em ${result.pages} página(s).`,
+      result.pending ? "info" : "success",
+    );
+    await refresh();
+  }),
+);
+$("#new-shift").addEventListener("click", () => {
+  $("#duty-date").value = today;
+  $("#day-off-date").value = "";
+  $("#shift-preview").textContent = "Escolha a data da folga.";
+  $("#shift-dialog").showModal();
+});
+function updateShiftPreview() {
+  const date = $("#day-off-date").value;
+  const duty = $("#duty-date").value;
+  if (!date) {
+    $("#shift-preview").textContent = "Escolha a data da folga.";
+    return;
+  }
+  if (date === duty) {
+    $("#shift-preview").textContent =
+      "A folga e o plantão precisam ser em dias diferentes.";
+    return;
+  }
+  const day = new Date(`${date}T12:00:00Z`).getUTCDay();
+  $("#shift-preview").textContent =
+    day === 5
+      ? "Folga na sexta: plantão de 08:00."
+      : day === 0 || day === 6
+        ? "A folga precisa cair entre segunda e sexta."
+        : "Folga em dia útil: plantão de 09:00.";
+}
+$("#day-off-date").addEventListener("change", updateShiftPreview);
+$("#duty-date").addEventListener("change", updateShiftPreview);
+$("#save-shift").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    const dutyDate = $("#duty-date").value;
+    const dayOffDate = $("#day-off-date").value;
+    if (!dutyDate || !dayOffDate) throw new Error("Informe as duas datas.");
+    if (dutyDate === dayOffDate)
+      throw new Error("A folga e o plantão precisam ser em dias diferentes.");
+    const result = await api("/api/shifts", {
+      method: "POST",
+      body: JSON.stringify({ dutyDate, dayOffDate }),
+    });
+    $("#shift-dialog").close();
+    message(`Plantão de ${fmt(result.targetMinutes)} provisionado.`, "success");
+    await refresh();
+  }),
+);
+$("#shifts").addEventListener("click", (event) => {
+  const button = event.target.closest(".remove-shift");
+  if (!button) return;
+  action(button, async () => {
+    await api(`/api/shifts/${button.dataset.id}`, { method: "DELETE" });
+    message("Plantão excluído.", "success");
+    await refresh();
+  });
+});
+$("#import-button").addEventListener("click", () => $("#import-file").click());
+$("#import-file").addEventListener("change", async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+  try {
+    const result = await api("/api/import", {
+      method: "POST",
+      body: await file.text(),
+    });
+    message(`${result.added} marcação(ões) importada(s).`, "success");
+    await refresh();
+  } catch (error) {
+    message(error.message, "danger");
+  }
+  event.target.value = "";
+});
+$("#days").addEventListener("click", (event) => {
+  const row = event.target.closest("tr[data-date]");
+  if (!row) return;
+  selectedDate = row.dataset.date;
+  const day = state.days.find((item) => item.date === selectedDate);
+  $("#day-title").textContent = `Dia ${dateLabel(selectedDate)}`;
+  $("#day-target").value =
+    `${String(Math.floor(day.target / 60)).padStart(2, "0")}:${String(day.target % 60).padStart(2, "0")}`;
+  $("#day-note").value = day.note;
+  $("#day-target").disabled = !!day.shiftKind;
+  $("#day-note").disabled = !!day.shiftKind;
+  $("#save-day").disabled = !!day.shiftKind;
+  $("#new-mark").value = "";
+  $("#mark-list").innerHTML = day.marks
+    .map(
+      (time, i) =>
+        `<div class="d-flex justify-content-between align-items-center border-bottom py-1"><span>${time}</span>${day.ids[i]?.startsWith("manual:") ? `<button type="button" class="btn btn-sm btn-link text-danger remove-mark" data-id="${escapeHtml(day.ids[i])}">Remover</button>` : '<span class="text-secondary">Acuttis</span>'}</div>`,
+    )
+    .join("");
+  $("#day-dialog").showModal();
+});
+$("#save-day").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    const [h, m] = $("#day-target").value.split(":").map(Number);
+    await api("/api/day", {
+      method: "PUT",
+      body: JSON.stringify({
+        date: selectedDate,
+        targetMinutes: h * 60 + m,
+        note: $("#day-note").value,
+      }),
+    });
+    $("#day-dialog").close();
+    message("Jornada do dia salva.", "success");
+    await refresh();
+  }),
+);
+$("#add-mark").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    if (!$("#new-mark").value) throw new Error("Informe um horário.");
+    await api("/api/mark", {
+      method: "POST",
+      body: JSON.stringify({ date: selectedDate, time: $("#new-mark").value }),
+    });
+    $("#day-dialog").close();
+    message("Marcação local adicionada.", "success");
+    await refresh();
+  }),
+);
+$("#mark-list").addEventListener("click", (event) => {
+  const button = event.target.closest(".remove-mark");
+  if (!button) return;
+  action(button, async () => {
+    await api(`/api/mark/${encodeURIComponent(button.dataset.id)}`, {
+      method: "DELETE",
+    });
+    $("#day-dialog").close();
+    message("Marcação local removida.", "success");
+    await refresh();
+  });
+});
+$("#settings").addEventListener("submit", (event) => {
+  event.preventDefault();
+  action(event.submitter, async () => {
+    const [h, m] = $("#planned-start").value.split(":").map(Number);
+    await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        plannedStart: h * 60 + m,
+        breakMinutes: Number($("#break").value),
+        toleranceMinutes: Number($("#tolerance").value),
+      }),
+    });
+    $("#settings-dialog").close();
+    message("Preferências salvas.", "success");
+    await refresh();
+  });
+});
+refresh();
+setInterval(() => {
+  if (
+    document.visibilityState === "visible" &&
+    $("#month").value === today.slice(0, 7)
+  )
+    refresh();
+}, 5000);
