@@ -23,6 +23,46 @@ const today = new Intl.DateTimeFormat("sv-SE", {
 }).format(new Date());
 $("#month").value = today.slice(0, 7);
 
+const appearanceKey = "controle-ponto.appearance";
+const defaultAppearance = { theme: "system", primary: "#2267a5" };
+function readAppearance() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(appearanceKey) || "{}");
+    return {
+      theme: ["system", "light", "dark"].includes(saved.theme) ? saved.theme : "system",
+      primary: /^#[0-9a-f]{6}$/i.test(saved.primary || "") ? saved.primary : defaultAppearance.primary,
+    };
+  } catch {
+    return { ...defaultAppearance };
+  }
+}
+function applyAppearance() {
+  const appearance = readAppearance();
+  const resolvedTheme = appearance.theme === "system"
+    ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+    : appearance.theme;
+  const root = document.documentElement;
+  root.dataset.theme = resolvedTheme;
+  root.dataset.bsTheme = resolvedTheme;
+  root.style.setProperty("--blue", appearance.primary);
+  root.style.setProperty("--primary-color", appearance.primary);
+  const rgb = appearance.primary.match(/[\da-f]{2}/gi).map((part) => Number.parseInt(part, 16));
+  root.style.setProperty("--bs-primary", appearance.primary);
+  root.style.setProperty("--bs-primary-rgb", rgb.join(", "));
+  $("#theme-choice").value = appearance.theme;
+  $("#primary-color").value = appearance.primary;
+  $("#primary-color-value").textContent = appearance.primary.toUpperCase();
+}
+function saveAppearance(changes) {
+  const appearance = { ...readAppearance(), ...changes };
+  localStorage.setItem(appearanceKey, JSON.stringify(appearance));
+  applyAppearance();
+}
+applyAppearance();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (readAppearance().theme === "system") applyAppearance();
+});
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -141,9 +181,9 @@ function render(data) {
         day.date === data.today && day.target > 0 && !day.complete;
       const badge =
         day.shiftKind === "duty"
-          ? '<span class="badge badge-soft mx-3">Plantão</span>'
+          ? '<span class="badge  badge-soft mx-3">Plantão</span>'
           : partial
-            ? '<span class="badge text-bg-primary mx-3">Em aberto</span>'
+            ? '<span class="badge badge-soft-dark mx-3">Em aberto</span>'
             : "";
       return `<tr data-date="${day.date}" class="${day.date === data.today ? "today" : ""}"><td><strong>${dateLabel(day.date)}</strong> <span class="text-secondary">${dow}</span>${badge}</td><td>${fmt(day.target)}</td><td>${day.marks.length ? day.marks.map((time) => `<span class="punch">${time}</span>`).join("") : '<span class="text-secondary">—</span>'}</td><td>${isFuture ? "—" : fmt(day.worked)}</td><td class="${!isFuture && !partial ? balanceClass(day.balance) : ""}">${isFuture || partial || day.marks.length === 0 ? "—" : fmt(day.balance)}</td><td class="text-secondary">${escapeHtml(day.note)}</td></tr>`;
     })
@@ -184,9 +224,38 @@ async function action(button, fn) {
   }
 }
 $("#month").addEventListener("change", refresh);
-$("#open-settings").addEventListener("click", () =>
-  $("#settings-dialog").showModal(),
-);
+$("#open-settings").addEventListener("click", () => {
+  applyAppearance();
+  $("#settings-dialog").showModal();
+});
+function selectSettingsTab(tab) {
+  const appearance = tab === "appearance";
+  $("#tab-work").classList.toggle("active", !appearance);
+  $("#tab-work").setAttribute("aria-selected", String(!appearance));
+  $("#tab-appearance").classList.toggle("active", appearance);
+  $("#tab-appearance").setAttribute("aria-selected", String(appearance));
+  $("#panel-work").hidden = appearance;
+  $("#panel-work").classList.toggle("active", !appearance);
+  $("#panel-appearance").hidden = !appearance;
+  $("#panel-appearance").classList.toggle("active", appearance);
+}
+$("#tab-work").addEventListener("click", () => selectSettingsTab("work"));
+$("#tab-appearance").addEventListener("click", () => selectSettingsTab("appearance"));
+$(".settings-tabs").addEventListener("keydown", (event) => {
+  const tabs = [$("#tab-work"), $("#tab-appearance")];
+  const current = tabs.indexOf(document.activeElement);
+  if (current < 0) return;
+  const next = event.key === "ArrowRight" ? (current + 1) % tabs.length
+    : event.key === "ArrowLeft" ? (current + tabs.length - 1) % tabs.length
+      : event.key === "Home" ? 0
+        : event.key === "End" ? tabs.length - 1 : -1;
+  if (next < 0) return;
+  event.preventDefault();
+  tabs[next].focus();
+  tabs[next].click();
+});
+$("#theme-choice").addEventListener("change", (event) => saveAppearance({ theme: event.target.value }));
+$("#primary-color").addEventListener("input", (event) => saveAppearance({ primary: event.target.value }));
 $("#open-acuttis").addEventListener("click", () =>
   $("#acuttis-dialog").showModal(),
 );

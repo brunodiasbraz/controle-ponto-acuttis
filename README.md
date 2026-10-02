@@ -13,6 +13,8 @@ npm start
 
 Abra <http://127.0.0.1:3000>. O banco fica em `data/ponto.sqlite` e o perfil isolado do Chrome em `data/chrome-profile`. Ambos são ignorados pelo Git. Para mudar a porta ou o caminho do navegador, use `PORT` e `CHROME_PATH`.
 
+O ícone de configurações abre as preferências de jornada e a aba **Aparência**, onde é possível escolher o tema padrão do sistema, claro ou escuro, e definir a cor primária. Essas escolhas são salvas no navegador atual.
+
 ## Sincronizar com o Acuttis
 
 1. Clique em **Conectar Acuttis** e depois em **Abrir login**. O aplicativo abre um perfil próprio do Chrome.
