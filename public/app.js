@@ -123,9 +123,25 @@ function message(text, type = "info") {
 function metric(label, value, hint, css = "") {
   return `<div class="col-6 col-lg-3"><div class="card border-0 shadow-sm h-100"><div class="card-body p-3 p-lg-4"><div class="metric-label">${label}</div><div class="metric ${css} mt-2">${value}</div><div class="metric-hint mt-2">${hint}</div></div></div></div>`;
 }
-function projection(title, item, note) {
+function projection(title, item, note, highlightFridayExit = false) {
   if (!item)
     return `<div class="col-12 col-lg-4"><div class="card border-0 shadow-sm h-100"><div class="card-body p-4"><div class="metric-label">${title}</div><p class="text-secondary mb-0 mt-3">Fechamento fora do mês selecionado.</p></div></div></div>`;
+  const nowParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Sao_Paulo",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const nowMinutes = Number(nowParts.find((part) => part.type === "hour").value) * 60
+    + Number(nowParts.find((part) => part.type === "minute").value);
+  const exitParts = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(item.exit || "");
+  const exitMinutes = exitParts ? Number(exitParts[1]) * 60 + Number(exitParts[2]) : null;
+  const exitSoon = highlightFridayExit
+    && item.date === today
+    && new Date(`${today}T12:00:00Z`).getUTCDay() === 5
+    && exitMinutes !== null
+    && exitMinutes >= nowMinutes
+    && exitMinutes - nowMinutes <= 10;
   const alert = item.missing.length
     ? `<div class="small negative mt-2">Faltam batimentos em ${item.missing.map(dateLabel).join(", ")}. Previsão suspensa.</div>`
     : "";
@@ -136,7 +152,10 @@ function projection(title, item, note) {
   const detail = item.dayOff
     ? `Sem jornada neste dia · saldo anterior: <strong>${fmt(item.balanceBefore)}</strong>`
     : `${note} · Trabalho necessário: <strong>${fmt(item.requiredWork)}</strong>`;
-  return `<div class="col-12 col-lg-4"><div class="card border-0 shadow-sm h-100"><div class="card-body p-4"><div class="d-flex justify-content-between align-items-start"><div class="metric-label">${title}</div><span class="badge badge-soft">${dateLabel(item.date)}</span></div><div class="projection-value mt-2">${output}</div><div class="small text-secondary">${detail}</div>${alert}${assumption}</div></div></div>`;
+  const exitMessage = exitSoon
+    ? `<div class="small exit-soon-message mt-2"><span class="exit-info-icon" aria-hidden="true">i</span>Você poderá sair às <strong>${item.exit}</strong> se desejar.</div>`
+    : "";
+  return `<div class="col-12 col-lg-4"><div class="card border-0 shadow-sm h-100${exitSoon ? " projection-exit-soon" : ""}"><div class="card-body p-4"><div class="d-flex justify-content-between align-items-start"><div class="metric-label">${title}</div><span class="badge badge-soft">${dateLabel(item.date)}</span></div><div class="projection-value mt-2">${output}</div><div class="small text-secondary">${detail}</div>${exitMessage}${alert}${assumption}</div></div></div>`;
 }
 function todayProjection(item) {
   if (!item)
@@ -184,6 +203,7 @@ function render(data) {
       "Saída na sexta-feira",
       data.projections.friday,
       "Zerar saldo da semana",
+      true,
     ) +
     projection(
       "Saída no último dia útil do mês",
