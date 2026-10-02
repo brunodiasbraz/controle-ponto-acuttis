@@ -79,6 +79,10 @@ h1 {
 .positive {
   color: #0f845c;
 }
+.primary-note {
+  color: var(--primary-color);
+  font-weight: 600;
+}
 .negative {
   color: #c25038;
 }

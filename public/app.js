@@ -122,7 +122,7 @@ function metric(label, value, hint, css = "") {
 }
 function projection(title, item, note) {
   if (!item)
-    return `<div class="col-lg-6"><div class="card border-0 shadow-sm h-100"><div class="card-body p-4"><div class="metric-label">${title}</div><p class="text-secondary mb-0 mt-3">Fechamento fora do mês selecionado.</p></div></div></div>`;
+    return `<div class="col-12 col-lg-4"><div class="card border-0 shadow-sm h-100"><div class="card-body p-4"><div class="metric-label">${title}</div><p class="text-secondary mb-0 mt-3">Fechamento fora do mês selecionado.</p></div></div></div>`;
   const alert = item.missing.length
     ? `<div class="small negative mt-2">Faltam batimentos em ${item.missing.map(dateLabel).join(", ")}. Previsão suspensa.</div>`
     : "";
@@ -133,7 +133,19 @@ function projection(title, item, note) {
   const detail = item.dayOff
     ? `Sem jornada neste dia · saldo anterior: <strong>${fmt(item.balanceBefore)}</strong>`
     : `${note} · Trabalho necessário: <strong>${fmt(item.requiredWork)}</strong>`;
-  return `<div class="col-lg-6"><div class="card border-0 shadow-sm h-100"><div class="card-body p-4"><div class="d-flex justify-content-between align-items-start"><div class="metric-label">${title}</div><span class="badge badge-soft">${dateLabel(item.date)}</span></div><div class="projection-value mt-2">${output}</div><div class="small text-secondary">${detail}</div>${alert}${assumption}</div></div></div>`;
+  return `<div class="col-12 col-lg-4"><div class="card border-0 shadow-sm h-100"><div class="card-body p-4"><div class="d-flex justify-content-between align-items-start"><div class="metric-label">${title}</div><span class="badge badge-soft">${dateLabel(item.date)}</span></div><div class="projection-value mt-2">${output}</div><div class="small text-secondary">${detail}</div>${alert}${assumption}</div></div></div>`;
+}
+function todayProjection(item) {
+  if (!item)
+    return `<div class="col-12 col-lg-4"><div class="card border-0 shadow-sm h-100"><div class="card-body p-4"><div class="metric-label">Saída de hoje</div><p class="text-secondary mb-0 mt-3">Dia atual fora do mês selecionado.</p></div></div></div>`;
+  const header = `<div class="d-flex justify-content-between align-items-start"><div class="metric-label">Saída de hoje</div><span class="badge badge-soft">${dateLabel(item.date)}</span></div>`;
+  if (item.dayOff)
+    return `<div class="col-12 col-lg-4"><div class="card border-0 shadow-sm h-100"><div class="card-body p-4">${header}<div class="projection-value mt-2">Folga</div><div class="small text-secondary">Não há jornada prevista para hoje.</div></div></div></div>`;
+  const output = item.exit || "—";
+  const status = item.complete ? "Saída registrada" : "Saída estimada";
+  const overtime = item.maxExtraMinutes ? `Pode fazer até ${fmt(item.maxExtraMinutes)} hora(s) extra · limite ${item.latestExit}.` : `Sem hora extra prevista · limite ${item.latestExit}.`;
+  const detail = `Jornada: ${fmt(item.target)} · trabalhadas: ${fmt(item.worked)}.`;
+  return `<div class="col-12 col-lg-4"><div class="card border-0 shadow-sm h-100"><div class="card-body p-4">${header}<div class="projection-value mt-2">${output}</div><div class="small text-secondary">${status} · ${detail}</div><div class="small primary-note mt-2">${overtime}</div></div></div></div>`;
 }
 function render(data) {
   state = data;
@@ -164,6 +176,7 @@ function render(data) {
       balanceClass(s.balance),
     );
   $("#projections").innerHTML =
+    todayProjection(data.projections.today) +
     projection(
       "Saída na sexta-feira",
       data.projections.friday,

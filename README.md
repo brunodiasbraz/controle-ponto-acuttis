@@ -44,6 +44,7 @@ Importações são idempotentes pelo `_id` do Acuttis. As marcações locais sã
 - Saldo: horas trabalhadas menos jornada prevista. A tolerância diária é de 10 minutos por padrão, como nos exemplos da planilha: diferenças de até 10 minutos não entram no saldo. Esse valor pode ser ajustado nas preferências. Os cartões de saldo incluem apenas dias fechados.
 - Sexta: a previsão usa o saldo desde o começo da semana ou desde o começo do mês, o que vier depois. A saída estimada é a hora necessária para zerar esse saldo, com o almoço previsto quando ainda não foi batido.
 - Último dia útil do mês: a previsão usa o saldo do mês. Dias futuros são projetados pela jornada padrão e as sextas futuras compensam o saldo da respectiva semana.
+- Saída de hoje: calcula o fim da jornada prevista e o limite diário de saída com hora extra. O limite adicional é de 1h de segunda a quinta e 2h na sexta.
 - Se faltarem batimentos completos em dias anteriores ao fechamento, a previsão fica suspensa até corrigir os dados ou marcar o dia como folga.
 
 As previsões são auxiliares. Para registro oficial, valem os horários e as regras aplicados pela empresa no Acuttis.

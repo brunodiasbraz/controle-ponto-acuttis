@@ -115,3 +115,21 @@ export function projectedExit(
     return clock(plannedStart + Math.max(0, requiredWork) + breakMinutes);
   return null;
 }
+
+export function projectedExitLimit(
+  day,
+  extraMinutes,
+  breakMinutes = 60,
+  plannedStart = 480,
+) {
+  if (day.target <= 0) return null;
+  const allowedWork = day.target + extraMinutes;
+  if (day.complete && !day.open && day.marks.length >= 2) {
+    const times = day.marks.map(minutes);
+    let observedBreaks = 0;
+    for (let i = 2; i < times.length; i += 2)
+      observedBreaks += times[i] - times[i - 1];
+    return clock(times[0] + allowedWork + observedBreaks);
+  }
+  return projectedExit(day, allowedWork, breakMinutes, plannedStart);
+}

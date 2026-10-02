@@ -7,7 +7,9 @@ import {
   friday,
   lastWorkday,
   projectedExit,
+  projectedExitLimit,
   weekStart,
+  weekday,
 } from "./calc.js";
 
 export function dashboard(month, today) {
@@ -113,6 +115,27 @@ export function dashboard(month, today) {
 
   const plannedStart = Number(setting("planned_start", "480"));
 
+  function todayExitProjection() {
+    if (today.slice(0, 7) !== month) return null;
+    const day = map.get(today);
+    if (!day || day.target <= 0)
+      return { date: today, dayOff: true, target: 0, worked: day?.worked || 0 };
+    const dayOfWeek = weekday(today);
+    const maxExtraMinutes = dayOfWeek >= 1 && dayOfWeek <= 4 ? 60 : dayOfWeek === 5 ? 120 : 0;
+    const exit = day.complete && !day.open ? day.lastMark : projectedExit(day, day.target, breakMinutes, plannedStart);
+    const latestExit = projectedExitLimit(day, maxExtraMinutes, breakMinutes, plannedStart);
+    return {
+      date: today,
+      target: day.target,
+      worked: day.worked,
+      complete: day.complete && !day.open,
+      dayOff: false,
+      exit,
+      latestExit,
+      maxExtraMinutes,
+    };
+  }
+
   function projection(closeDate, periodStart, settleFridays = false) {
     if (closeDate < today || closeDate.slice(0, 7) !== month) return null;
     const prior = days.filter(
@@ -201,6 +224,7 @@ export function dashboard(month, today) {
       monthTarget: sum(days, "target"),
     },
     projections: {
+      today: todayExitProjection(),
       friday: projection(thisFriday, weekStart(today)),
       monthEnd: projection(monthClose, start, true),
     },
