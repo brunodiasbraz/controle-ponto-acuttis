@@ -61,6 +61,9 @@ function applyAppearance() {
   $("#theme-choice").value = appearance.theme;
   $("#primary-color").value = appearance.primary;
   $("#primary-color-value").textContent = appearance.primary.toUpperCase();
+  $("#welcome-theme").value = appearance.theme;
+  $("#welcome-primary-color").value = appearance.primary;
+  $("#welcome-primary-color-value").textContent = appearance.primary.toUpperCase();
 }
 function saveAppearance(changes) {
   const appearance = { ...readAppearance(), ...changes };
@@ -290,6 +293,12 @@ $("#theme-choice").addEventListener("change", (event) =>
 $("#primary-color").addEventListener("input", (event) =>
   saveAppearance({ primary: event.target.value }),
 );
+$("#welcome-theme").addEventListener("change", (event) =>
+  saveAppearance({ theme: event.target.value }),
+);
+$("#welcome-primary-color").addEventListener("input", (event) =>
+  saveAppearance({ primary: event.target.value }),
+);
 async function loadAcuttisCredentials() {
   try {
     const value = await api("/api/acuttis/credentials");
@@ -515,9 +524,132 @@ $("#settings").addEventListener("submit", (event) => {
     await refresh();
   });
 });
-refresh();
+let onboardingStep = 1;
+let onboardingConfiguredCredentials = false;
+let onboardingWarning = "";
+
+function showWelcome() {
+  $("#startup-screen").hidden = true;
+  $("#dashboard-app").hidden = true;
+  $("#welcome-screen").hidden = false;
+}
+function showDashboard() {
+  $("#startup-screen").hidden = true;
+  $("#welcome-screen").hidden = true;
+  $("#dashboard-app").hidden = false;
+}
+function setWelcomeStep(step) {
+  onboardingStep = step;
+  for (let index = 1; index <= 3; index += 1) {
+    const panel = $(`#welcome-step-${index}`);
+    const indicator = $(`[data-step-indicator="${index}"]`);
+    panel.hidden = index !== step;
+    indicator.classList.toggle("active", index === step);
+    indicator.classList.toggle("done", index < step);
+  }
+  $("#welcome-step-count").textContent = `Etapa ${step} de 3`;
+  $("#welcome-back").hidden = step === 1;
+  $("#welcome-next").hidden = step === 3;
+  $("#welcome-finish").hidden = step !== 3;
+  $("#welcome-next").textContent = step === 1
+    ? "Salvar acesso e continuar"
+    : "Salvar jornada e continuar";
+  $("#welcome-error").hidden = true;
+}
+function welcomeError(error) {
+  const box = $("#welcome-error");
+  box.textContent = error;
+  box.hidden = false;
+}
+
+async function initializeApp() {
+  try {
+    const [data, onboarding] = await Promise.all([
+      api(`/api/dashboard?month=${encodeURIComponent(today.slice(0, 7))}`),
+      api("/api/onboarding"),
+    ]);
+    render(data);
+    if (onboarding.complete) {
+      showDashboard();
+      return;
+    }
+    const credentials = await api("/api/acuttis/credentials");
+    onboardingConfiguredCredentials = credentials.configured;
+    $("#welcome-acuttis-username").value = credentials.username;
+    $("#welcome-acuttis-password").value = "";
+    $("#welcome-planned-start").value = `${String(Math.floor(data.settings.plannedStart / 60)).padStart(2, "0")}:${String(data.settings.plannedStart % 60).padStart(2, "0")}`;
+    $("#welcome-break").value = data.settings.breakMinutes;
+    $("#welcome-tolerance").value = data.settings.tolerance;
+    setWelcomeStep(1);
+    showWelcome();
+  } catch (error) {
+    showWelcome();
+    welcomeError(`Não foi possível preparar a configuração inicial: ${error.message}`);
+  }
+}
+
+$("#welcome-back").addEventListener("click", () => setWelcomeStep(Math.max(1, onboardingStep - 1)));
+$("#welcome-next").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  $("#welcome-error").hidden = true;
+  try {
+    if (onboardingStep === 1) {
+      const username = $("#welcome-acuttis-username").value.trim();
+      const password = $("#welcome-acuttis-password").value;
+      if (!username) throw new Error("Informe seu usuário do Acuttis.");
+      if (!password && !onboardingConfiguredCredentials) throw new Error("Informe sua senha do Acuttis.");
+      await api("/api/acuttis/credentials", {
+        method: "PUT",
+        body: JSON.stringify({ username, password }),
+      });
+      onboardingConfiguredCredentials = true;
+      $("#welcome-acuttis-password").value = "";
+      try {
+        await api("/api/acuttis/open", { method: "POST" });
+      } catch (error) {
+        onboardingWarning = `As credenciais foram salvas, mas não foi possível abrir o Chromium: ${error.message}`;
+      }
+    } else if (onboardingStep === 2) {
+      const [hours, minutes] = $("#welcome-planned-start").value.split(":").map(Number);
+      const breakMinutes = Number($("#welcome-break").value);
+      const toleranceMinutes = Number($("#welcome-tolerance").value);
+      if (!$("#welcome-planned-start").value || !Number.isInteger(breakMinutes) || !Number.isInteger(toleranceMinutes)) {
+        throw new Error("Preencha todos os campos da jornada.");
+      }
+      await api("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({ plannedStart: hours * 60 + minutes, breakMinutes, toleranceMinutes }),
+      });
+    }
+    setWelcomeStep(onboardingStep + 1);
+  } catch (error) {
+    welcomeError(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+$("#welcome-finish").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  $("#welcome-error").hidden = true;
+  try {
+    await api("/api/onboarding/complete", { method: "POST" });
+    showDashboard();
+    await refresh();
+    if (onboardingWarning) message(onboardingWarning, "info");
+    else message("Configuração concluída. Seu painel está pronto.", "success");
+  } catch (error) {
+    welcomeError(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+initializeApp();
 setInterval(() => {
   if (
+    !$("#dashboard-app").hidden &&
     document.visibilityState === "visible" &&
     $("#month").value === today.slice(0, 7)
   )

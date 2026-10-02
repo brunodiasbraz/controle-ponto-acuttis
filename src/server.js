@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
-import { db, importMarks, saveSetting } from './db.js';
+import { db, importMarks, saveSetting, setting } from './db.js';
 import { dashboard } from './dashboard.js';
 import { localDate, minutes, shiftTargetForDayOff, weekday } from './calc.js';
 import { openBrowser, syncMarks, syncStatus } from './acuttis.js';
@@ -29,6 +29,14 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'GET' && url.pathname === '/api/dashboard') {
         const today = localDate();
         return json(res, 200, { ...dashboard(url.searchParams.get('month') || today.slice(0, 7), today), sync: syncStatus() });
+      }
+      if (req.method === 'GET' && url.pathname === '/api/onboarding') return json(res, 200, { complete: setting('onboarding_complete', '0') === '1' });
+      if (req.method === 'POST' && url.pathname === '/api/onboarding/complete') {
+        if (!getAcuttisCredentials() || !setting('planned_start', '') || !setting('break_minutes', '') || !setting('tolerance_minutes', '')) {
+          throw Object.assign(new Error('Conclua o acesso ao Acuttis e configure sua jornada antes de começar.'), { status: 409 });
+        }
+        saveSetting('onboarding_complete', '1');
+        return json(res, 200, { complete: true });
       }
       if (req.method === 'POST' && url.pathname === '/api/acuttis/open') return json(res, 200, await openBrowser());
       if (req.method === 'POST' && url.pathname === '/api/acuttis/sync') return json(res, 200, await syncMarks(localDate().slice(0, 7) + '-01'));

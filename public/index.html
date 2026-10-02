@@ -11,7 +11,87 @@
     <link href="/style.css" rel="stylesheet" />
   </head>
   <body>
-    <main class="container py-4 py-lg-5">
+    <div id="startup-screen" class="startup-screen" role="status">Preparando seu painel de ponto…</div>
+    <section id="welcome-screen" class="welcome-shell" hidden>
+      <div class="welcome-card card shadow-sm">
+        <div class="welcome-card-body">
+          <div class="eyebrow">CONTROLE PESSOAL DE JORNADA</div>
+          <h1 class="welcome-title">Bem-vindo ao Meu Ponto</h1>
+          <p class="text-secondary mb-4">Vamos preparar seu acesso, sua jornada e a aparência do painel. Isso leva só alguns passos.</p>
+          <div class="welcome-progress" aria-label="Configuração inicial">
+            <div class="welcome-progress-step active" data-step-indicator="1"><span>1</span><small>Acuttis</small></div>
+            <div class="welcome-progress-line"></div>
+            <div class="welcome-progress-step" data-step-indicator="2"><span>2</span><small>Jornada</small></div>
+            <div class="welcome-progress-line"></div>
+            <div class="welcome-progress-step" data-step-indicator="3"><span>3</span><small>Aparência</small></div>
+          </div>
+
+          <section id="welcome-step-1" class="welcome-step-panel" aria-labelledby="welcome-step-title-1">
+            <h2 id="welcome-step-title-1" class="h5 mt-4">Acesso ao Acuttis</h2>
+            <p class="small text-secondary">Informe o usuário e a senha para o aplicativo abrir a sessão e buscar seus batimentos.</p>
+            <div class="mb-3">
+              <label for="welcome-acuttis-username" class="form-label">Usuário</label>
+              <input id="welcome-acuttis-username" class="form-control" type="text" autocomplete="username" maxlength="255" />
+            </div>
+            <div class="mb-3">
+              <label for="welcome-acuttis-password" class="form-label">Senha</label>
+              <input id="welcome-acuttis-password" class="form-control" type="password" autocomplete="new-password" maxlength="1024" />
+              <div class="form-text">A senha é cifrada antes de ser guardada. Se já estiver salva, deixe em branco para mantê-la.</div>
+            </div>
+            <p class="small text-secondary mb-0">MFA ou CAPTCHA, se solicitados, serão concluídos manualmente na janela do Chromium.</p>
+          </section>
+
+          <section id="welcome-step-2" class="welcome-step-panel" aria-labelledby="welcome-step-title-2" hidden>
+            <h2 id="welcome-step-title-2" class="h5 mt-4">Sua jornada de trabalho</h2>
+            <p class="small text-secondary">Defina os horários usados nas previsões de saída. Você poderá alterá-los depois nas configurações.</p>
+            <div class="row g-3">
+              <div class="col-sm-6">
+                <label for="welcome-planned-start" class="form-label">Entrada prevista</label>
+                <input id="welcome-planned-start" type="time" class="form-control" required />
+              </div>
+              <div class="col-sm-6">
+                <label for="welcome-break" class="form-label">Almoço previsto</label>
+                <div class="input-group"><input id="welcome-break" type="number" min="0" max="180" class="form-control" required /><span class="input-group-text">min</span></div>
+              </div>
+              <div class="col-sm-6">
+                <label for="welcome-tolerance" class="form-label">Tolerância diária</label>
+                <div class="input-group"><input id="welcome-tolerance" type="number" min="0" max="30" class="form-control" required /><span class="input-group-text">min</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section id="welcome-step-3" class="welcome-step-panel" aria-labelledby="welcome-step-title-3" hidden>
+            <h2 id="welcome-step-title-3" class="h5 mt-4">Escolha sua aparência</h2>
+            <p class="small text-secondary">Defina como o painel deve aparecer neste navegador. Você pode mudar isso a qualquer momento.</p>
+            <div class="mb-3">
+              <label for="welcome-theme" class="form-label">Tema</label>
+              <select id="welcome-theme" class="form-select">
+                <option value="system">Padrão do sistema</option>
+                <option value="light">Claro</option>
+                <option value="dark">Escuro</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label for="welcome-primary-color" class="form-label">Cor primária</label>
+              <div class="d-flex gap-2 align-items-center">
+                <input id="welcome-primary-color" type="color" class="form-control form-control-color" value="#2267a5" title="Escolher cor primária" />
+                <span id="welcome-primary-color-value" class="small text-secondary">#2267A5</span>
+              </div>
+            </div>
+            <p class="small text-secondary mb-0">Tudo pronto. Clique abaixo para começar a controlar seu ponto.</p>
+          </section>
+
+          <div id="welcome-error" class="alert alert-danger mt-3 mb-0" role="alert" hidden></div>
+          <div class="d-flex justify-content-between align-items-center gap-2 mt-4">
+            <button id="welcome-back" type="button" class="btn btn-outline-secondary" hidden>Voltar</button>
+            <span id="welcome-step-count" class="small text-secondary ms-auto me-auto">Etapa 1 de 3</span>
+            <button id="welcome-next" type="button" class="btn btn-primary">Salvar acesso e continuar</button>
+            <button id="welcome-finish" type="button" class="btn btn-primary" hidden>Começar a controlar meu ponto</button>
+          </div>
+        </div>
+      </div>
+    </section>
+    <main id="dashboard-app" class="container py-4 py-lg-5" hidden>
       <header
         class="d-flex flex-column flex-lg-row gap-3 justify-content-between align-items-lg-center mb-4"
       >
