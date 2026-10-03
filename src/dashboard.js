@@ -12,7 +12,7 @@ import {
   weekday,
 } from "./calc.js";
 
-export function dashboard(month, today) {
+export function dashboard(month, today, userId) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Mês inválido.");
   const start = `${month}-01`;
   const end = addDays(
@@ -22,20 +22,20 @@ export function dashboard(month, today) {
     ).getUTCDate() - 1,
   );
 
-  const tolerance = Number(setting("tolerance_minutes", "10"));
+  const tolerance = Number(setting(userId, "tolerance_minutes", "10"));
 
   const overrides = new Map(
     db
-      .prepare("SELECT * FROM day_settings WHERE date BETWEEN ? AND ?")
-      .all(start, end)
+      .prepare("SELECT * FROM day_settings WHERE user_id = ? AND date BETWEEN ? AND ?")
+      .all(userId, start, end)
       .map((row) => [row.date, row]),
   );
 
   const shifts = db
     .prepare(
-      "SELECT id, duty_date, day_off_date, duty_target_minutes FROM shift_provisions WHERE (duty_date BETWEEN ? AND ?) OR (day_off_date BETWEEN ? AND ?) ORDER BY duty_date",
+      "SELECT id, duty_date, day_off_date, duty_target_minutes FROM shift_provisions WHERE user_id = ? AND ((duty_date BETWEEN ? AND ?) OR (day_off_date BETWEEN ? AND ?)) ORDER BY duty_date",
     )
-    .all(start, end, start, end);
+    .all(userId, start, end, start, end);
 
   const shiftDays = new Map();
 
@@ -56,9 +56,9 @@ export function dashboard(month, today) {
 
   const allMarks = db
     .prepare(
-      "SELECT id, mark_datetime, origin FROM marks WHERE mark_datetime >= ? AND mark_datetime < ? ORDER BY mark_datetime",
+      "SELECT id, mark_datetime, origin FROM marks WHERE user_id = ? AND mark_datetime >= ? AND mark_datetime < ? ORDER BY mark_datetime",
     )
-    .all(`${start} 00:00:00`, `${addDays(end, 1)} 00:00:00`);
+    .all(userId, `${start} 00:00:00`, `${addDays(end, 1)} 00:00:00`);
 
   const byDay = new Map();
 
@@ -111,9 +111,9 @@ export function dashboard(month, today) {
     .filter((day) => day.date < today && day.target > 0 && !day.complete)
     .map((day) => day.date);
 
-  const breakMinutes = Number(setting("break_minutes", "60"));
+  const breakMinutes = Number(setting(userId, "break_minutes", "60"));
 
-  const plannedStart = Number(setting("planned_start", "480"));
+  const plannedStart = Number(setting(userId, "planned_start", "480"));
 
   function todayExitProjection() {
     if (today.slice(0, 7) !== month) return null;

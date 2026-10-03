@@ -1,6 +1,8 @@
 const $ = (selector) => document.querySelector(selector);
 let state;
 let selectedDate;
+let authUsername = "";
+let authMode = "login";
 const names = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
 const escapeHtml = (text) =>
   String(text ?? "").replace(
@@ -81,6 +83,7 @@ async function api(path, options = {}) {
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
   });
   const value = await response.json();
+  if (response.status === 401 && value.unauthenticated) showAuth();
   if (!response.ok)
     throw new Error(value.error || "Não foi possível concluir a operação.");
   return value;
@@ -272,11 +275,12 @@ async function action(button, fn) {
 $("#month").addEventListener("change", refresh);
 $("#open-settings").addEventListener("click", () => {
   applyAppearance();
+  $("#account-username").textContent = authUsername;
   $("#settings-dialog").showModal();
   loadAcuttisCredentials();
 });
 function selectSettingsTab(tab) {
-  for (const name of ["work", "appearance", "acuttis"]) {
+  for (const name of ["work", "appearance", "acuttis", "account"]) {
     const selected = name === tab;
     $(`#tab-${name}`).classList.toggle("active", selected);
     $(`#tab-${name}`).setAttribute("aria-selected", String(selected));
@@ -289,8 +293,9 @@ $("#tab-appearance").addEventListener("click", () =>
   selectSettingsTab("appearance"),
 );
 $("#tab-acuttis").addEventListener("click", () => selectSettingsTab("acuttis"));
+$("#tab-account").addEventListener("click", () => selectSettingsTab("account"));
 $(".settings-tabs").addEventListener("keydown", (event) => {
-  const tabs = [$("#tab-work"), $("#tab-appearance"), $("#tab-acuttis")];
+  const tabs = [$("#tab-work"), $("#tab-appearance"), $("#tab-acuttis"), $("#tab-account")];
   const current = tabs.indexOf(document.activeElement);
   if (current < 0) return;
   const next =
@@ -551,13 +556,22 @@ let onboardingWarning = "";
 
 function showWelcome() {
   $("#startup-screen").hidden = true;
+  $("#auth-screen").hidden = true;
   $("#dashboard-app").hidden = true;
   $("#welcome-screen").hidden = false;
 }
-function showDashboard() {
+function showAuth() {
   $("#startup-screen").hidden = true;
   $("#welcome-screen").hidden = true;
+  $("#dashboard-app").hidden = true;
+  $("#auth-screen").hidden = false;
+}
+function showDashboard() {
+  $("#startup-screen").hidden = true;
+  $("#auth-screen").hidden = true;
+  $("#welcome-screen").hidden = true;
   $("#dashboard-app").hidden = false;
+  $("#account-username").textContent = authUsername;
 }
 function setWelcomeStep(step) {
   onboardingStep = step;
@@ -585,6 +599,12 @@ function welcomeError(error) {
 
 async function initializeApp() {
   try {
+    const auth = await api("/api/auth/status");
+    if (!auth.authenticated) {
+      showAuth();
+      return;
+    }
+    authUsername = auth.user.username;
     const [data, onboarding] = await Promise.all([
       api(`/api/dashboard?month=${encodeURIComponent(today.slice(0, 7))}`),
       api("/api/onboarding"),
@@ -608,6 +628,52 @@ async function initializeApp() {
     welcomeError(`Não foi possível preparar a configuração inicial: ${error.message}`);
   }
 }
+
+function updateAuthMode() {
+  const registering = authMode === "register";
+  $("#auth-submit").textContent = registering ? "Criar conta" : "Entrar";
+  $("#auth-toggle-prompt").textContent = registering ? "Já tem conta?" : "Ainda não tem conta?";
+  $("#auth-toggle").textContent = registering ? "Entrar" : "Criar conta";
+  $("#auth-password").autocomplete = registering ? "new-password" : "current-password";
+  $("#auth-password-help").hidden = !registering;
+  $("#auth-error").hidden = true;
+}
+$("#auth-toggle").addEventListener("click", () => {
+  authMode = authMode === "login" ? "register" : "login";
+  updateAuthMode();
+});
+$("#auth-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("#auth-submit");
+  const errorBox = $("#auth-error");
+  button.disabled = true;
+  errorBox.hidden = true;
+  try {
+    await api(`/api/auth/${authMode}`, {
+      method: "POST",
+      body: JSON.stringify({ username: $("#auth-username").value.trim(), password: $("#auth-password").value }),
+    });
+    $("#auth-password").value = "";
+    $("#auth-screen").hidden = true;
+    $("#startup-screen").hidden = false;
+    await initializeApp();
+  } catch (error) {
+    errorBox.textContent = error.message;
+    errorBox.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+});
+$("#logout").addEventListener("click", async () => {
+  try {
+    await api("/api/auth/logout", { method: "POST" });
+    authUsername = "";
+    $("#settings-dialog").close();
+    showAuth();
+  } catch (error) {
+    message(error.message, "danger");
+  }
+});
 
 $("#welcome-back").addEventListener("click", () => setWelcomeStep(Math.max(1, onboardingStep - 1)));
 $("#welcome-next").addEventListener("click", async (event) => {

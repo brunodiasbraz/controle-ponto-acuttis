@@ -45,15 +45,15 @@ function decrypt(value) {
   }
 }
 
-export function getAcuttisCredentials() {
-  const stored = setting(credentialSetting, "");
+export function getAcuttisCredentials(userId) {
+  const stored = setting(userId, credentialSetting, "");
   return stored ? decrypt(stored) : null;
 }
 
-export function saveAcuttisCredentials(username, password) {
-  saveSetting(credentialSetting, encrypt({ username, password }));
+export function saveAcuttisCredentials(userId, username, password) {
+  saveSetting(userId, credentialSetting, encrypt({ username, password }));
 }
 
-export function deleteAcuttisCredentials() {
-  saveSetting(credentialSetting, "");
+export function deleteAcuttisCredentials(userId) {
+  saveSetting(userId, credentialSetting, "");
 }

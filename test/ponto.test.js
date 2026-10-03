@@ -38,11 +38,14 @@ test('sexta com 11 minutos de crédito prevê saída às 16:19', () => {
 test('importação idempotente e previsão mensal considera a compensação de sexta', async () => {
   process.env.DB_PATH = resolve(mkdtempSync('/tmp/ponto-test-'), 'ponto.sqlite');
   const { importMarks } = await import('../src/db.js');
+  const { db } = await import('../src/db.js');
   const { dashboard } = await import('../src/dashboard.js');
+  const userId = 'test-shift-user';
+  db.prepare('INSERT INTO users(id,username,password_hash) VALUES(?,?,?)').run(userId, 'test-shift-user', 'test');
   const sample = JSON.parse(readFileSync(resolve('test/sample.json'), 'utf8'));
-  assert.equal(importMarks(sample).added, 5);
-  assert.equal(importMarks(sample).added, 0);
-  const result = dashboard('2026-10', '2026-10-02');
+  assert.equal(importMarks(sample, userId).added, 5);
+  assert.equal(importMarks(sample, userId).added, 0);
+  const result = dashboard('2026-10', '2026-10-02', userId);
   assert.equal(result.projections.friday.exit, '16:19');
   assert.equal(result.projections.monthEnd.exit, '17:00');
 });
@@ -50,15 +53,42 @@ test('importação idempotente e previsão mensal considera a compensação de s
 test('plantão com folga na sexta tem 8h e a tabela inclui o plantão futuro', async () => {
   const { db } = await import('../src/db.js');
   const { dashboard } = await import('../src/dashboard.js');
-  db.prepare('INSERT INTO shift_provisions(duty_date,day_off_date,duty_target_minutes) VALUES(?,?,?)').run('2026-10-03', '2026-10-09', 480);
-  const result = dashboard('2026-10', '2026-10-02');
+  const userId = 'test-user';
+  db.prepare('INSERT INTO users(id,username,password_hash) VALUES(?,?,?)').run(userId, 'test-user', 'test');
+  db.prepare('INSERT INTO shift_provisions(user_id,duty_date,day_off_date,duty_target_minutes) VALUES(?,?,?,?)').run(userId, '2026-10-03', '2026-10-09', 480);
+  const result = dashboard('2026-10', '2026-10-02', userId);
   assert.equal(result.days.find(day => day.date === '2026-10-03').target, 480);
   assert.equal(result.days.find(day => day.date === '2026-10-03').shiftKind, 'duty');
   assert.equal(result.days.some(day => day.date === '2026-10-05'), false);
   assert.equal(result.days.some(day => day.date === '2026-10-09'), false);
   assert.equal(result.shifts[0].day_off_date, '2026-10-09');
   assert.equal(result.summary.monthTarget, 193 * 60);
-  const beforeFolga = dashboard('2026-10', '2026-10-08');
+  const beforeFolga = dashboard('2026-10', '2026-10-08', userId);
   assert.equal(beforeFolga.projections.friday.dayOff, true);
   assert.equal(beforeFolga.projections.friday.exit, null);
+});
+
+test('contas isolam senhas, sessões, configurações e batimentos', async () => {
+  const { register, authenticate, createSession, getSession, deleteSession } = await import('../src/auth.js');
+  const { completeOnboarding, importMarks, onboardingComplete, saveSetting } = await import('../src/db.js');
+  const alice = await register('alice.test', 'uma senha suficientemente forte 1');
+  const bob = await register('bob.test', 'outra senha suficientemente forte 2');
+  assert.equal((await authenticate('ALICE.TEST', 'uma senha suficientemente forte 1')).id, alice.id);
+  assert.equal(await authenticate('alice.test', 'senha errada longa o bastante'), null);
+  const session = createSession(alice.id);
+  assert.equal(getSession(session.token).username, 'alice.test');
+  deleteSession(session.token);
+  assert.equal(getSession(session.token), null);
+  saveSetting(alice.id, 'planned_start', 510);
+  assert.equal(saveSetting(bob.id, 'planned_start', 480), undefined);
+  assert.equal((await import('../src/db.js')).setting(alice.id, 'planned_start', ''), '510');
+  assert.equal((await import('../src/db.js')).setting(bob.id, 'planned_start', ''), '480');
+  completeOnboarding(alice.id);
+  assert.equal(onboardingComplete(alice.id), true);
+  assert.equal(onboardingComplete(bob.id), false);
+  const mark = [{ _id: 'same-acuttis-mark', mark_datetime: '2026-10-02 08:00:00' }];
+  importMarks(mark, alice.id);
+  const { dashboard } = await import('../src/dashboard.js');
+  assert.equal(dashboard('2026-10', '2026-10-02', alice.id).summary.markCount, 1);
+  assert.equal(dashboard('2026-10', '2026-10-02', bob.id).summary.markCount, 0);
 });
