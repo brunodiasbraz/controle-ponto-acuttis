@@ -210,6 +210,7 @@ function render(data) {
       data.projections.monthEnd,
       "Zerar saldo mensal",
     );
+  $("#shifts-section").hidden = data.shifts.length === 0;
   $("#shifts").innerHTML = data.shifts.length
     ? data.shifts
         .map(
@@ -217,7 +218,7 @@ function render(data) {
             `<div class="d-flex justify-content-between align-items-center gap-3 border-top py-3"><div><strong>Plantão ${fullDate(shift.duty_date)}</strong> <span class="badge badge-soft ms-1">${fmt(shift.duty_target_minutes)}</span><div class="small text-secondary">Folga prevista: ${fullDate(shift.day_off_date)}</div></div><button class="btn btn-sm btn-outline-danger remove-shift" data-id="${shift.id}" type="button">Excluir</button></div>`,
         )
         .join("")
-    : '<p class="text-secondary small mb-0 mt-2">Nenhum plantão provisionado neste mês.</p>';
+    : "";
   $("#days").innerHTML = data.days
     .map((day) => {
       const dow = names[new Date(`${day.date}T12:00:00Z`).getUTCDay()];
