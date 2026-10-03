@@ -1,4 +1,5 @@
 import { db, setting } from "./db.js";
+import { getUserSchedule, scheduleTarget } from './work-schedules.js';
 import {
   addDays,
   datesBetween,
@@ -23,6 +24,9 @@ export function dashboard(month, today, userId) {
   );
 
   const tolerance = Number(setting(userId, "tolerance_minutes", "10"));
+  const schedule = getUserSchedule(userId);
+  const scheduledDay = date => schedule?.days.find(item => item.weekday === weekday(date));
+  const targetForDate = date => scheduleTarget(schedule, date) ?? defaultTarget(date);
 
   const overrides = new Map(
     db
@@ -74,7 +78,7 @@ export function dashboard(month, today, userId) {
       byDay.get(date) || [],
       shiftDays.get(date)?.target ??
         overrides.get(date)?.target_minutes ??
-        defaultTarget(date),
+        targetForDate(date),
       tolerance,
     ),
     note: shiftDays.get(date)?.note || overrides.get(date)?.note || "",
@@ -85,7 +89,7 @@ export function dashboard(month, today, userId) {
 
   const map = new Map(days.map((day) => [day.date, day]));
 
-  const targetFor = (date) => map.get(date)?.target ?? defaultTarget(date);
+  const targetFor = (date) => map.get(date)?.target ?? targetForDate(date);
 
   const monthClose = lastWorkday(today, targetFor);
 
@@ -112,7 +116,6 @@ export function dashboard(month, today, userId) {
     .map((day) => day.date);
 
   const breakMinutes = Number(setting(userId, "break_minutes", "60"));
-
   const plannedStart = Number(setting(userId, "planned_start", "480"));
 
   function todayExitProjection() {
@@ -121,9 +124,12 @@ export function dashboard(month, today, userId) {
     if (!day || day.target <= 0)
       return { date: today, dayOff: true, target: 0, worked: day?.worked || 0 };
     const dayOfWeek = weekday(today);
+    const todaysSchedule = scheduledDay(today);
+    const dayBreak = todaysSchedule?.breakMinutes ?? breakMinutes;
+    const dayStart = todaysSchedule ? Number(todaysSchedule.startTime.slice(0,2))*60 + Number(todaysSchedule.startTime.slice(3)) : plannedStart;
     const maxExtraMinutes = dayOfWeek >= 1 && dayOfWeek <= 4 ? 60 : dayOfWeek === 5 ? 120 : 0;
-    const exit = day.complete && !day.open ? day.lastMark : projectedExit(day, day.target, breakMinutes, plannedStart);
-    const latestExit = projectedExitLimit(day, maxExtraMinutes, breakMinutes, plannedStart);
+    const exit = day.complete && !day.open ? day.lastMark : projectedExit(day, day.target, dayBreak, dayStart);
+    const latestExit = projectedExitLimit(day, maxExtraMinutes, dayBreak, dayStart);
     return {
       date: today,
       target: day.target,
@@ -184,11 +190,14 @@ export function dashboard(month, today, userId) {
     }, 0);
     const requiredWork = Math.max(0, targetFor(closeDate) - balanceBefore);
     const closeDay = map.get(closeDate);
+    const closeSchedule = scheduledDay(closeDate);
+    const closeBreak = closeSchedule?.breakMinutes ?? breakMinutes;
+    const closeStart = closeSchedule ? Number(closeSchedule.startTime.slice(0,2))*60 + Number(closeSchedule.startTime.slice(3)) : plannedStart;
     const dayOff = closeDay.target === 0;
     const exit =
       dayOff || missing.length
         ? null
-        : projectedExit(closeDay, requiredWork, breakMinutes, plannedStart);
+        : projectedExit(closeDay, requiredWork, closeBreak, closeStart);
     return {
       date: closeDate,
       requiredWork: dayOff ? 0 : requiredWork,
@@ -211,7 +220,7 @@ export function dashboard(month, today, userId) {
         (day.shiftKind === "duty" && day.date >= today),
     ),
     shifts,
-    settings: { breakMinutes, plannedStart, tolerance },
+    settings: { breakMinutes, plannedStart, tolerance, scheduleName: schedule?.name || 'Equipe Dev', scheduleId: schedule?.id || 'equipe-dev' },
     summary: {
       worked: sum(monthToDate, "worked"),
       expected: sum(monthClosed, "target"),

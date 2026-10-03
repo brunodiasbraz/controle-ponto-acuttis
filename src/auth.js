@@ -24,6 +24,7 @@ export async function register(usernameInput, password) {
   try {
     const firstUser = db.prepare('SELECT COUNT(*) AS count FROM users').get().count === 0;
     db.prepare('INSERT INTO users(id,username,password_hash) VALUES(?,?,?)').run(id, username, hash);
+    db.prepare("INSERT INTO user_work_schedules(user_id,schedule_id) VALUES(?,'equipe-dev')").run(id);
     if (firstUser) claimLegacyData(id);
     db.exec('COMMIT');
     return { id, username };

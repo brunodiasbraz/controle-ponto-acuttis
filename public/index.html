@@ -66,21 +66,12 @@
 
           <section id="welcome-step-2" class="welcome-step-panel" aria-labelledby="welcome-step-title-2" hidden>
             <h2 id="welcome-step-title-2" class="h5 mt-4">Sua jornada de trabalho</h2>
-            <p class="small text-secondary">Defina os horários usados nas previsões de saída. Você poderá alterá-los depois nas configurações.</p>
-            <div class="row g-3">
-              <div class="col-sm-6">
-                <label for="welcome-planned-start" class="form-label">Entrada prevista</label>
-                <input id="welcome-planned-start" type="time" class="form-control" required />
-              </div>
-              <div class="col-sm-6">
-                <label for="welcome-break" class="form-label">Almoço previsto</label>
-                <div class="input-group"><input id="welcome-break" type="number" min="0" max="180" class="form-control" required /><span class="input-group-text">min</span></div>
-              </div>
-              <div class="col-sm-6">
-                <label for="welcome-tolerance" class="form-label">Tolerância diária</label>
-                <div class="input-group"><input id="welcome-tolerance" type="number" min="0" max="30" class="form-control" required /><span class="input-group-text">min</span></div>
-              </div>
-            </div>
+            <p class="small text-secondary">Escolha uma jornada compartilhada ou crie uma para disponibilizar aos próximos usuários. A jornada Telecom inclui sábado alternado, 08:00–14:00, com intervalo de 30 minutos.</p>
+            <label for="welcome-schedule" class="form-label">Jornada</label><select id="welcome-schedule" class="form-select"></select>
+            <div id="welcome-schedule-summary" class="schedule-summary mt-2"></div>
+            <button id="welcome-new-schedule" type="button" class="btn btn-outline-primary btn-sm mt-3">Criar jornada compartilhada</button>
+            <div id="welcome-schedule-builder" class="schedule-builder mt-3" hidden></div>
+            <div class="mt-3"><label for="welcome-tolerance" class="form-label">Tolerância diária</label><div class="input-group"><input id="welcome-tolerance" type="number" min="0" max="30" class="form-control" required /><span class="input-group-text">min</span></div></div>
           </section>
 
           <section id="welcome-step-3" class="welcome-step-panel" aria-labelledby="welcome-step-title-3" hidden>
@@ -308,29 +299,9 @@
           <button id="tab-account" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-account">Conta</button>
         </div>
         <section id="panel-work" class="settings-panel active" role="tabpanel" aria-labelledby="tab-work">
-        <div class="mb-3 mt-3">
-          <label for="planned-start" class="form-label">Entrada prevista</label
-          ><input
-            id="planned-start"
-            type="time"
-            class="form-control"
-            required
-          />
-        </div>
+        <div class="mt-3"><label for="settings-schedule" class="form-label">Jornada compartilhada</label><select id="settings-schedule" class="form-select"></select><div id="settings-schedule-summary" class="schedule-summary mt-2"></div><button id="settings-new-schedule" type="button" class="btn btn-outline-primary btn-sm mt-3">Criar jornada compartilhada</button><div id="settings-schedule-builder" class="schedule-builder mt-3" hidden></div></div>
         <div class="mb-3">
-          <label for="break" class="form-label">Almoço previsto</label
-          ><input
-            id="break"
-            type="number"
-            min="0"
-            max="180"
-            class="form-control"
-            required
-          />
-          <div class="form-text">Minutos</div>
-        </div>
-        <div class="mb-3">
-          <label for="tolerance" class="form-label">Tolerância diária</label
+          <label for="tolerance" class="form-label mt-3">Tolerância diária</label
           ><input
             id="tolerance"
             type="number"

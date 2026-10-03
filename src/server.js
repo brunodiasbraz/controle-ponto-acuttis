@@ -7,6 +7,7 @@ import { localDate, minutes, shiftTargetForDayOff, weekday } from './calc.js';
 import { openBrowser, syncMarks, syncStatus } from './acuttis.js';
 import { deleteAcuttisCredentials, getAcuttisCredentials, saveAcuttisCredentials } from './acuttis-credentials.js';
 import { authenticate, createSession, deleteSession, getSession, register, sessionMaxAge } from './auth.js';
+import { assignSchedule, createSchedule, scheduleList } from './work-schedules.js';
 
 const port = Number(process.env.PORT || 3000);
 const publicRoot = resolve('public');
@@ -92,13 +93,19 @@ const server = http.createServer(async (req, res) => {
       const user = getSession(requestCookie(req, cookieName));
       if (!user) return json(res, 401, { error: 'Faça login para continuar.', unauthenticated: true });
       const userId = user.id;
+      if (req.method === 'GET' && url.pathname === '/api/work-schedules') return json(res, 200, scheduleList(userId));
+      if (req.method === 'POST' && url.pathname === '/api/work-schedules') return json(res, 201, createSchedule(userId, await body(req)));
+      if (req.method === 'PUT' && url.pathname === '/api/work-schedules/assign') {
+        const input = await body(req); assignSchedule(userId, input.scheduleId);
+        return json(res, 200, { ok: true });
+      }
       if (req.method === 'GET' && url.pathname === '/api/dashboard') {
         const today = localDate();
         return json(res, 200, { ...dashboard(url.searchParams.get('month') || today.slice(0, 7), today, userId), sync: syncStatus(userId) });
       }
       if (req.method === 'GET' && url.pathname === '/api/onboarding') return json(res, 200, { complete: onboardingComplete(userId) });
       if (req.method === 'POST' && url.pathname === '/api/onboarding/complete') {
-        if (!getAcuttisCredentials(userId) || !setting(userId, 'planned_start', '') || !setting(userId, 'break_minutes', '') || !setting(userId, 'tolerance_minutes', '')) {
+        if (!getAcuttisCredentials(userId) || !setting(userId, 'tolerance_minutes', '')) {
           throw Object.assign(new Error('Conclua o acesso ao Acuttis e configure sua jornada antes de começar.'), { status: 409 });
         }
         completeOnboarding(userId);
@@ -149,9 +156,11 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'PUT' && url.pathname === '/api/settings') {
         const input = await body(req);
-        if (!Number.isInteger(input.breakMinutes) || input.breakMinutes < 0 || input.breakMinutes > 180 || !Number.isInteger(input.plannedStart) || input.plannedStart < 0 || input.plannedStart >= 1440 || !Number.isInteger(input.toleranceMinutes) || input.toleranceMinutes < 0 || input.toleranceMinutes > 30) throw Object.assign(new Error('Configurações inválidas.'), { status: 400 });
-        saveSetting(userId, 'break_minutes', input.breakMinutes);
-        saveSetting(userId, 'planned_start', input.plannedStart);
+        if (!Number.isInteger(input.toleranceMinutes) || input.toleranceMinutes < 0 || input.toleranceMinutes > 30) throw Object.assign(new Error('Configurações inválidas.'), { status: 400 });
+        if (Number.isInteger(input.breakMinutes) && Number.isInteger(input.plannedStart)) {
+          saveSetting(userId, 'break_minutes', input.breakMinutes);
+          saveSetting(userId, 'planned_start', input.plannedStart);
+        }
         saveSetting(userId, 'tolerance_minutes', input.toleranceMinutes);
         return json(res, 200, { ok: true });
       }

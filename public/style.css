@@ -90,7 +90,7 @@ h1 {
   border: 0;
   border-radius: 18px;
   box-shadow: 0 16px 60px #1232;
-  width: min(95vw, 580px);
+  width: min(95vw, 880px);
   padding: 0;
 }
 .day-dialog::backdrop {
@@ -321,3 +321,8 @@ body{background:var(--surface);color:var(--ink);transition:background-color .2s,
 .projection-exit-soon{position:relative;border:2px solid var(--primary-color)!important}.projection-exit-soon::after{position:absolute;inset:-4px;border:2px solid var(--primary-color);border-radius:inherit;content:"";pointer-events:none;animation:exit-card-pulse 1.6s ease-out infinite}.exit-soon-message{display:flex;align-items:center;gap:.5rem;color:var(--ink)}.exit-info-icon{display:inline-grid;place-items:center;width:1.1rem;height:1.1rem;flex:0 0 1.1rem;border:1px solid var(--primary-color);border-radius:50%;color:var(--primary-color);font-size:.72rem;font-weight:700;font-style:normal}
 @keyframes exit-card-pulse{0%{opacity:.85;transform:scale(1)}100%{opacity:0;transform:scale(1.035)}}
 @media(prefers-reduced-motion:reduce){.projection-exit-soon{animation:none}}
+.schedule-summary{font-size:.88rem;color:var(--bs-secondary-color)}
+.schedule-days{display:grid;gap:.45rem}
+.schedule-day{display:grid;grid-template-columns:minmax(90px,1fr) repeat(4,minmax(78px,.8fr)) minmax(125px,1.2fr) minmax(135px,1.2fr);align-items:center;gap:.4rem;padding:.45rem;border:1px solid var(--bs-border-color);border-radius:.5rem}
+.schedule-day label{margin:0;white-space:nowrap}.schedule-day input[type=checkbox]{accent-color:var(--primary-color)}
+@media(max-width:760px){.schedule-day{grid-template-columns:1fr 1fr 1fr}.schedule-day label{grid-column:span 3}}

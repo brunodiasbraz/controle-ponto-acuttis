@@ -38,6 +38,31 @@ db.exec(`
     complete INTEGER NOT NULL DEFAULT 0 CHECK(complete IN (0,1)),
     completed_at TEXT
   );
+  CREATE TABLE IF NOT EXISTS work_schedules (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    is_builtin INTEGER NOT NULL DEFAULT 0 CHECK(is_builtin IN (0,1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS work_schedule_days (
+    schedule_id TEXT NOT NULL REFERENCES work_schedules(id) ON DELETE CASCADE,
+    weekday INTEGER NOT NULL CHECK(weekday BETWEEN 0 AND 6),
+    start_minute INTEGER NOT NULL CHECK(start_minute BETWEEN 0 AND 1439),
+    end_minute INTEGER NOT NULL CHECK(end_minute BETWEEN 1 AND 1440),
+    break_minutes INTEGER NOT NULL CHECK(break_minutes BETWEEN 0 AND 240),
+    frequency TEXT NOT NULL DEFAULT 'weekly' CHECK(frequency IN ('weekly','biweekly')),
+    anchor_date TEXT,
+    PRIMARY KEY(schedule_id, weekday),
+    CHECK(end_minute > start_minute),
+    CHECK(break_minutes < end_minute - start_minute),
+    CHECK((frequency='weekly' AND anchor_date IS NULL) OR (frequency='biweekly' AND anchor_date IS NOT NULL))
+  );
+  CREATE TABLE IF NOT EXISTS user_work_schedules (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    schedule_id TEXT NOT NULL REFERENCES work_schedules(id),
+    assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
   CREATE TABLE IF NOT EXISTS marks (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     id TEXT NOT NULL,
@@ -71,6 +96,12 @@ db.exec(`
     UNIQUE(user_id, day_off_date)
   );
 `);
+
+db.prepare("INSERT OR IGNORE INTO work_schedules(id,name,is_builtin) VALUES('equipe-dev','Equipe Dev',1)").run();
+const devDay = db.prepare("INSERT OR IGNORE INTO work_schedule_days(schedule_id,weekday,start_minute,end_minute,break_minutes) VALUES('equipe-dev',?,?,?,60)");
+for (const day of [1, 2, 3, 4]) devDay.run(day, 480, 1080);
+devDay.run(5, 480, 1020);
+db.exec("INSERT OR IGNORE INTO user_work_schedules(user_id,schedule_id) SELECT id,'equipe-dev' FROM users");
 
 export function setting(userId, key, fallback) {
   return db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(userId, key)?.value ?? fallback;

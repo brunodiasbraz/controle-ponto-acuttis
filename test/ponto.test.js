@@ -92,3 +92,26 @@ test('contas isolam senhas, sessões, configurações e batimentos', async () =>
   assert.equal(dashboard('2026-10', '2026-10-02', alice.id).summary.markCount, 1);
   assert.equal(dashboard('2026-10', '2026-10-02', bob.id).summary.markCount, 0);
 });
+
+test('jornadas compartilhadas calculam média com sábado alternado e aplicam o ciclo por data', async () => {
+  const { createSchedule, assignSchedule, scheduleTarget, scheduleList } = await import('../src/work-schedules.js');
+  const userId = 'telecom-schedule-user';
+  const { db } = await import('../src/db.js');
+  db.prepare('INSERT INTO users(id,username,password_hash) VALUES(?,?,?)').run(userId, userId, 'test');
+  const days = [1,2,3,4,5].map(weekday => ({ weekday, startTime:'08:00', endTime:'17:30', breakMinutes:60, frequency:'weekly' }));
+  days.push({ weekday:6, startTime:'08:00', endTime:'14:00', breakMinutes:30, frequency:'biweekly', anchorDate:'2026-10-03' });
+  const schedule = createSchedule(userId, { name:'Equipe Telecom de teste', days });
+  assert.equal(scheduleTarget(schedule, '2026-10-03'), 330);
+  assert.equal(scheduleTarget(schedule, '2026-10-10'), 0);
+  assert.equal(scheduleTarget(schedule, '2026-10-17'), 330);
+  const catalog = scheduleList(userId);
+  const shared = catalog.schedules.find(item => item.id === schedule.id);
+  assert.equal(shared.weeklyAverageMinutes, 2715); // 45h15 por semana
+  assert.equal(shared.monthlyAverageMinutes, 11765);
+  const { dashboard } = await import('../src/dashboard.js');
+  assert.equal(dashboard('2026-10', '2026-10-01', userId).summary.monthTarget, 12210);
+  const other = 'other-schedule-user';
+  db.prepare('INSERT INTO users(id,username,password_hash) VALUES(?,?,?)').run(other, other, 'test');
+  assignSchedule(other, schedule.id);
+  assert.equal(scheduleList(other).selectedId, schedule.id);
+});

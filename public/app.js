@@ -3,6 +3,7 @@ let state;
 let selectedDate;
 let authUsername = "";
 let authMode = "login";
+let scheduleCatalog = [];
 const names = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
 const escapeHtml = (text) =>
   String(text ?? "").replace(
@@ -14,6 +15,32 @@ const escapeHtml = (text) =>
   );
 const fmt = (n) =>
   `${n < 0 ? "−" : ""}${String(Math.floor(Math.abs(n) / 60)).padStart(2, "0")}:${String(Math.abs(n) % 60).padStart(2, "0")}`;
+const scheduleNames = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+const hoursFmt = value => `${Math.floor(value / 60)}h${String(value % 60).padStart(2,"0")}`;
+async function refreshSchedules(prefix, selectedId) {
+  const data = await api('/api/work-schedules'); scheduleCatalog = data.schedules;
+  const select = $(`#${prefix}-schedule`);
+  select.innerHTML = scheduleCatalog.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(s.name)}</option>`).join('');
+  select.value = selectedId || data.selectedId;
+  renderScheduleSummary(prefix); select.onchange = () => renderScheduleSummary(prefix);
+}
+function renderScheduleSummary(prefix) {
+  const schedule = scheduleCatalog.find(s => s.id === $(`#${prefix}-schedule`).value);
+  if (!schedule) return;
+  const days = schedule.days.map(d => `${scheduleNames[d.weekday]} ${d.startTime}–${d.endTime} (intervalo ${d.breakMinutes} min${d.frequency === 'biweekly' ? ', sábado alternado' : ''})`).join(' · ');
+  $(`#${prefix}-schedule-summary`).textContent = `${days}. Média: ${hoursFmt(schedule.weeklyAverageMinutes)} por semana e ${hoursFmt(schedule.monthlyAverageMinutes)} por mês.`;
+}
+function initScheduleBuilder(prefix) {
+  const box = $(`#${prefix}-schedule-builder`);
+  box.innerHTML = `<label class="form-label">Nome da jornada</label><input class="form-control mb-2" data-schedule-name maxlength="60" placeholder="Ex.: Equipe Telecom"><div class="schedule-days">${scheduleNames.map((name,weekday) => `<div class="schedule-day"><label><input type="checkbox" data-active="${weekday}" ${weekday>=1&&weekday<=5?'checked':''}> ${name}</label><input type="time" class="form-control form-control-sm" data-start="${weekday}" value="08:00"><input type="time" class="form-control form-control-sm" data-end="${weekday}" value="${weekday===6?'14:00':'17:30'}"><input type="number" class="form-control form-control-sm" data-break="${weekday}" min="0" max="240" value="${weekday===6?'30':'60'}" title="Intervalo em minutos"><select class="form-select form-select-sm" data-frequency="${weekday}"><option value="weekly">Toda semana</option><option value="biweekly">Semana sim, semana não</option></select><input type="date" class="form-control form-control-sm" data-anchor="${weekday}" hidden aria-label="Primeiro dia trabalhado"></div>`).join('')}</div><div class="form-text">Para sábado alternado, selecione “Semana sim, semana não” e informe a primeira data em que ele será trabalhado.</div><div class="d-flex gap-2 mt-2"><button type="button" class="btn btn-primary btn-sm" data-create-schedule>Salvar e usar jornada</button><button type="button" class="btn btn-outline-secondary btn-sm" data-cancel-builder>Cancelar</button></div><div class="small text-danger mt-2" data-builder-error hidden></div>`;
+  box.querySelectorAll('[data-frequency]').forEach(select => select.addEventListener('change', () => { const anchor=box.querySelector(`[data-anchor="${select.dataset.frequency}"]`); anchor.hidden=select.value!=='biweekly'; }));
+  box.querySelectorAll('[data-active]').forEach(check => check.addEventListener('change', () => { box.querySelectorAll(`[data-row="${check.dataset.active}"]`).forEach(()=>{}); for (const selector of ['[data-start]','[data-end]','[data-break]','[data-frequency]','[data-anchor]']) { const input=box.querySelector(`${selector}[data-${selector.slice(6,-1)}="${check.dataset.active}"]`); if(input) input.disabled=!check.checked; } }));
+  box.querySelector('[data-cancel-builder]').onclick=()=>box.hidden=true;
+  box.querySelector('[data-create-schedule]').onclick=async event=>{ const button=event.currentTarget, err=box.querySelector('[data-builder-error]'); button.disabled=true; err.hidden=true; try {
+    const days=[...box.querySelectorAll('[data-active]:checked')].map(check=>{const w=check.dataset.active;const frequency=box.querySelector(`[data-frequency="${w}"]`).value;return {weekday:Number(w),startTime:box.querySelector(`[data-start="${w}"]`).value,endTime:box.querySelector(`[data-end="${w}"]`).value,breakMinutes:Number(box.querySelector(`[data-break="${w}"]`).value),frequency,anchorDate:frequency==='biweekly'?box.querySelector(`[data-anchor="${w}"]`).value:null};});
+    const created=await api('/api/work-schedules',{method:'POST',body:JSON.stringify({name:box.querySelector('[data-schedule-name]').value,days})}); await refreshSchedules(prefix,created.id); box.hidden=true; message('Jornada compartilhada criada e selecionada.','success');
+  } catch(error){err.textContent=error.message;err.hidden=false;} finally{button.disabled=false;} };
+}
 const dateLabel = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 const fullDate = (iso) => `${dateLabel(iso)}/${iso.slice(0, 4)}`;
 const balanceClass = (n) => (n > 0 ? "positive" : n < 0 ? "negative" : "");
@@ -244,12 +271,7 @@ function render(data) {
       : data.sync.lastSync
         ? `Última sincronização: ${new Date(data.sync.lastSync).toLocaleString("pt-BR")} · automática a cada 5 min`
         : "Ainda não sincronizado com o Acuttis";
-  if (!$("#settings-dialog").open) {
-    $("#planned-start").value =
-      `${String(Math.floor(data.settings.plannedStart / 60)).padStart(2, "0")}:${String(data.settings.plannedStart % 60).padStart(2, "0")}`;
-    $("#break").value = data.settings.breakMinutes;
-    $("#tolerance").value = data.settings.tolerance;
-  }
+  if (!$("#settings-dialog").open) $("#tolerance").value = data.settings.tolerance;
 }
 async function refresh() {
   try {
@@ -277,6 +299,7 @@ $("#open-settings").addEventListener("click", () => {
   applyAppearance();
   $("#account-username").textContent = authUsername;
   $("#settings-dialog").showModal();
+  refreshSchedules("settings").catch(error => message(error.message, "danger"));
   loadAcuttisCredentials();
 });
 function selectSettingsTab(tab) {
@@ -536,15 +559,8 @@ $("#mark-list").addEventListener("click", (event) => {
 $("#settings").addEventListener("submit", (event) => {
   event.preventDefault();
   action(event.submitter, async () => {
-    const [h, m] = $("#planned-start").value.split(":").map(Number);
-    await api("/api/settings", {
-      method: "PUT",
-      body: JSON.stringify({
-        plannedStart: h * 60 + m,
-        breakMinutes: Number($("#break").value),
-        toleranceMinutes: Number($("#tolerance").value),
-      }),
-    });
+    await api('/api/work-schedules/assign', { method: 'PUT', body: JSON.stringify({ scheduleId: $('#settings-schedule').value }) });
+    await api("/api/settings", { method: "PUT", body: JSON.stringify({ toleranceMinutes: Number($("#tolerance").value) }) });
     $("#settings-dialog").close();
     message("Preferências salvas.", "success");
     await refresh();
@@ -615,11 +631,10 @@ async function initializeApp() {
       return;
     }
     const credentials = await api("/api/acuttis/credentials");
+    await refreshSchedules('welcome', data.settings.scheduleId);
     onboardingConfiguredCredentials = credentials.configured;
     $("#welcome-acuttis-username").value = credentials.username;
     $("#welcome-acuttis-password").value = "";
-    $("#welcome-planned-start").value = `${String(Math.floor(data.settings.plannedStart / 60)).padStart(2, "0")}:${String(data.settings.plannedStart % 60).padStart(2, "0")}`;
-    $("#welcome-break").value = data.settings.breakMinutes;
     $("#welcome-tolerance").value = data.settings.tolerance;
     setWelcomeStep(1);
     showWelcome();
@@ -698,16 +713,10 @@ $("#welcome-next").addEventListener("click", async (event) => {
         onboardingWarning = `As credenciais foram salvas, mas não foi possível abrir o Chromium: ${error.message}`;
       }
     } else if (onboardingStep === 2) {
-      const [hours, minutes] = $("#welcome-planned-start").value.split(":").map(Number);
-      const breakMinutes = Number($("#welcome-break").value);
       const toleranceMinutes = Number($("#welcome-tolerance").value);
-      if (!$("#welcome-planned-start").value || !Number.isInteger(breakMinutes) || !Number.isInteger(toleranceMinutes)) {
-        throw new Error("Preencha todos os campos da jornada.");
-      }
-      await api("/api/settings", {
-        method: "PUT",
-        body: JSON.stringify({ plannedStart: hours * 60 + minutes, breakMinutes, toleranceMinutes }),
-      });
+      if (!$("#welcome-schedule").value || !Number.isInteger(toleranceMinutes)) throw new Error("Selecione uma jornada e informe a tolerância.");
+      await api('/api/work-schedules/assign', { method: 'PUT', body: JSON.stringify({ scheduleId: $('#welcome-schedule').value }) });
+      await api("/api/settings", { method: "PUT", body: JSON.stringify({ toleranceMinutes }) });
     }
     setWelcomeStep(onboardingStep + 1);
   } catch (error) {
@@ -742,3 +751,7 @@ setInterval(() => {
   )
     refresh();
 }, 5000);
+
+initScheduleBuilder('welcome'); initScheduleBuilder('settings');
+$('#welcome-new-schedule').addEventListener('click',()=>$('#welcome-schedule-builder').hidden=false);
+$('#settings-new-schedule').addEventListener('click',()=>$('#settings-schedule-builder').hidden=false);
