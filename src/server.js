@@ -7,7 +7,7 @@ import { localDate, minutes, shiftTargetForDayOff, weekday } from './calc.js';
 import { openBrowser, syncMarks, syncStatus } from './acuttis.js';
 import { deleteAcuttisCredentials, getAcuttisCredentials, saveAcuttisCredentials } from './acuttis-credentials.js';
 import { authenticate, createSession, deleteSession, getSession, register, sessionMaxAge } from './auth.js';
-import { assignSchedule, createSchedule, scheduleList } from './work-schedules.js';
+import { assignSchedule, createSchedule, getSchedule, scheduleList } from './work-schedules.js';
 
 const port = Number(process.env.PORT || 3000);
 const publicRoot = resolve('public');
@@ -156,13 +156,14 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'PUT' && url.pathname === '/api/settings') {
         const input = await body(req);
-        if (!Number.isInteger(input.toleranceMinutes) || input.toleranceMinutes < 0 || input.toleranceMinutes > 30) throw Object.assign(new Error('Configurações inválidas.'), { status: 400 });
-        if (Number.isInteger(input.breakMinutes) && Number.isInteger(input.plannedStart)) {
-          saveSetting(userId, 'break_minutes', input.breakMinutes);
-          saveSetting(userId, 'planned_start', input.plannedStart);
-        }
-        saveSetting(userId, 'tolerance_minutes', input.toleranceMinutes);
-        return json(res, 200, { ok: true });
+        if (!Number.isInteger(input.toleranceMinutes) || input.toleranceMinutes < 0 || input.toleranceMinutes > 30 || (input.scheduleId !== undefined && !getSchedule(input.scheduleId))) throw Object.assign(new Error('Configurações inválidas.'), { status: 400 });
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          if (input.scheduleId !== undefined) assignSchedule(userId, input.scheduleId);
+          saveSetting(userId, 'tolerance_minutes', input.toleranceMinutes);
+          db.exec('COMMIT');
+        } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
+        return json(res, 200, { ok: true, scheduleId: input.scheduleId ?? null, toleranceMinutes: input.toleranceMinutes });
       }
       if (req.method === 'POST' && url.pathname === '/api/mark') {
         const input = await body(req);

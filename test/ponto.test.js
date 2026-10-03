@@ -101,6 +101,7 @@ test('jornadas compartilhadas calculam média com sábado alternado e aplicam o 
   const days = [1,2,3,4,5].map(weekday => ({ weekday, startTime:'08:00', endTime:'17:30', breakMinutes:60, frequency:'weekly' }));
   days.push({ weekday:6, startTime:'08:00', endTime:'14:00', breakMinutes:30, frequency:'biweekly', anchorDate:'2026-10-03' });
   const schedule = createSchedule(userId, { name:'Equipe Telecom de teste', days });
+  assignSchedule(userId, schedule.id);
   assert.equal(scheduleTarget(schedule, '2026-10-03'), 330);
   assert.equal(scheduleTarget(schedule, '2026-10-10'), 0);
   assert.equal(scheduleTarget(schedule, '2026-10-17'), 330);

@@ -54,6 +54,6 @@ export function createSchedule(userId, input) {
     db.prepare('INSERT INTO work_schedules(id,name,created_by) VALUES(?,?,?)').run(id,name,userId);
     const insert = db.prepare('INSERT INTO work_schedule_days(schedule_id,weekday,start_minute,end_minute,break_minutes,frequency,anchor_date) VALUES(?,?,?,?,?,?,?)');
     for (const day of days) insert.run(id,day.weekday,day.start,day.end,day.pause,day.frequency,day.anchor);
-    assignSchedule(userId,id); db.exec('COMMIT'); return getSchedule(id);
+    db.exec('COMMIT'); return getSchedule(id);
   } catch (error) { try { db.exec('ROLLBACK'); } catch {} if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') throw Object.assign(new Error('Já existe uma jornada com esse nome.'), { status: 409 }); throw error; }
 }

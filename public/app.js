@@ -298,9 +298,24 @@ $("#month").addEventListener("change", refresh);
 $("#open-settings").addEventListener("click", () => {
   applyAppearance();
   $("#account-username").textContent = authUsername;
+  if (state?.settings) $("#tolerance").value = state.settings.tolerance;
   $("#settings-dialog").showModal();
-  refreshSchedules("settings").catch(error => message(error.message, "danger"));
+  refreshSchedules("settings", state?.settings?.scheduleId).catch(error => message(error.message, "danger"));
   loadAcuttisCredentials();
+});
+$("#settings-close").addEventListener("click", () => $("#settings-dialog").close());
+$("#settings-cancel").addEventListener("click", () => $("#settings-dialog").close());
+$("#settings-dialog").addEventListener("close", () => {
+  // Descarta qualquer alteração local que não passou pelo botão Salvar.
+  if (state?.settings) {
+    $("#tolerance").value = state.settings.tolerance;
+    if ($("#settings-schedule").options.length) $("#settings-schedule").value = state.settings.scheduleId;
+    renderScheduleSummary("settings");
+  }
+  initScheduleBuilder("settings");
+  $("#settings-schedule-builder").hidden = true;
+  $("#acuttis-username").value = "";
+  $("#acuttis-password").value = "";
 });
 function selectSettingsTab(tab) {
   for (const name of ["work", "appearance", "acuttis", "account"]) {
@@ -558,9 +573,12 @@ $("#mark-list").addEventListener("click", (event) => {
 });
 $("#settings").addEventListener("submit", (event) => {
   event.preventDefault();
+  if (event.submitter?.id !== "settings-save") return;
   action(event.submitter, async () => {
-    await api('/api/work-schedules/assign', { method: 'PUT', body: JSON.stringify({ scheduleId: $('#settings-schedule').value }) });
-    await api("/api/settings", { method: "PUT", body: JSON.stringify({ toleranceMinutes: Number($("#tolerance").value) }) });
+    const scheduleId = $("#settings-schedule").value;
+    const toleranceMinutes = Number($("#tolerance").value);
+    const saved = await api("/api/settings", { method: "PUT", body: JSON.stringify({ scheduleId, toleranceMinutes }) });
+    if (saved.ok !== true || saved.scheduleId !== scheduleId || saved.toleranceMinutes !== toleranceMinutes) throw new Error("O servidor não confirmou as preferências. Confira os dados e tente novamente.");
     $("#settings-dialog").close();
     message("Preferências salvas.", "success");
     await refresh();
