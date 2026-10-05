@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Meu Ponto — sincronização Acuttis",
+  "version": "1.0.0",
+  "description": "Envia ao Meu Ponto os batimentos carregados na sua sessão do Acuttis quando você solicita a sincronização.",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": [
+    "https://app.acuttis.com.br/*",
+    "https://app-back.acuttis.com.br/*"
+  ],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "service-worker.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://app.acuttis.com.br/*"],
+      "js": ["acuttis-bridge.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "options_page": "options.html",
+  "action": { "default_title": "Meu Ponto: sincronização Acuttis" }
+}

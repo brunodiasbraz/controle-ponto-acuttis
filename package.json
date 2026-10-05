@@ -11,8 +11,5 @@
   },
   "engines": {
     "node": ">=22.9"
-  },
-  "dependencies": {
-    "playwright-core": "^1.63.0"
   }
 }

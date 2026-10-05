@@ -4,8 +4,6 @@ import { extname, resolve, sep } from 'node:path';
 import { completeOnboarding, db, importMarks, onboardingComplete, saveSetting, setting } from './db.js';
 import { dashboard } from './dashboard.js';
 import { localDate, minutes, shiftTargetForDayOff, weekday } from './calc.js';
-import { openBrowser, syncMarks, syncStatus } from './acuttis.js';
-import { deleteAcuttisCredentials, getAcuttisCredentials, saveAcuttisCredentials } from './acuttis-credentials.js';
 import { authenticate, createSession, deleteSession, getSession, register, sessionMaxAge } from './auth.js';
 import { assignSchedule, createSchedule, getSchedule, scheduleList } from './work-schedules.js';
 
@@ -101,38 +99,23 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'GET' && url.pathname === '/api/dashboard') {
         const today = localDate();
-        return json(res, 200, { ...dashboard(url.searchParams.get('month') || today.slice(0, 7), today, userId), sync: syncStatus(userId) });
+        return json(res, 200, { ...dashboard(url.searchParams.get('month') || today.slice(0, 7), today, userId), sync: { lastSync: setting(userId, 'last_sync', '') || null, lastError: null, connecting: false } });
       }
       if (req.method === 'GET' && url.pathname === '/api/onboarding') return json(res, 200, { complete: onboardingComplete(userId) });
       if (req.method === 'POST' && url.pathname === '/api/onboarding/complete') {
-        if (!getAcuttisCredentials(userId) || !setting(userId, 'tolerance_minutes', '')) {
-          throw Object.assign(new Error('Conclua o acesso ao Acuttis e configure sua jornada antes de começar.'), { status: 409 });
+        if (!setting(userId, 'tolerance_minutes', '')) {
+          throw Object.assign(new Error('Configure sua jornada antes de começar.'), { status: 409 });
         }
         completeOnboarding(userId);
         return json(res, 200, { complete: true });
       }
-      if (req.method === 'POST' && url.pathname === '/api/acuttis/open') return json(res, 200, await openBrowser(userId));
-      if (req.method === 'POST' && url.pathname === '/api/acuttis/sync') return json(res, 200, await syncMarks(userId, localDate().slice(0, 7) + '-01'));
-      if (req.method === 'GET' && url.pathname === '/api/acuttis/credentials') {
-        const credentials = getAcuttisCredentials(userId);
-        return json(res, 200, { configured: !!credentials, username: credentials?.username || '' });
-      }
-      if (req.method === 'PUT' && url.pathname === '/api/acuttis/credentials') {
+      if (req.method === 'POST' && url.pathname === '/api/import') {
         const input = await body(req);
-        const username = typeof input.username === 'string' ? input.username.trim() : '';
-        const oldCredentials = getAcuttisCredentials(userId);
-        const password = typeof input.password === 'string' && input.password ? input.password : oldCredentials?.password;
-        if (!username || username.length > 255 || typeof password !== 'string' || !password || password.length > 1024) {
-          throw Object.assign(new Error('Informe um usuário e uma senha válida.'), { status: 400 });
-        }
-        saveAcuttisCredentials(userId, username, password);
-        return json(res, 200, { configured: true, username });
+        const result = importMarks(input, userId);
+        const syncedAt = input?.source === 'acuttis-extension' ? new Date().toISOString() : null;
+        if (syncedAt) saveSetting(userId, 'last_sync', syncedAt);
+        return json(res, 200, { ...result, syncedAt });
       }
-      if (req.method === 'DELETE' && url.pathname === '/api/acuttis/credentials') {
-        deleteAcuttisCredentials(userId);
-        return json(res, 200, { configured: false });
-      }
-      if (req.method === 'POST' && url.pathname === '/api/import') return json(res, 200, importMarks(await body(req), userId));
       if (req.method === 'POST' && url.pathname === '/api/shifts') {
         const input = await body(req);
         if (!validDate(input.dutyDate) || !validDate(input.dayOffDate) || input.dayOffDate === input.dutyDate || ![1, 2, 3, 4, 5].includes(weekday(input.dayOffDate))) throw Object.assign(new Error('Informe datas diferentes para o plantão e a folga, que deve cair de segunda a sexta.'), { status: 400 });

@@ -4,7 +4,7 @@ Aplicação em Node.js, SQLite, HTML e Bootstrap para acompanhar batimentos, hor
 
 ## Rodar
 
-Requer Node.js 22.9 ou superior e Google Chrome instalado no servidor para sincronizar com o Acuttis.
+Requer Node.js 22.9 ou superior. A sincronização do Acuttis usa uma extensão do Chrome instalada no computador de cada usuário; o servidor não inicia navegador.
 
 ```bash
 npm install
@@ -17,23 +17,21 @@ Por padrão, o servidor escuta em todas as interfaces na porta `3000`. Crie uma 
 
 Em produção, publique atrás de um proxy HTTPS (por exemplo, Nginx ou Caddy) e defina `NODE_ENV=production` e `APP_ORIGIN=https://ponto.seudominio.com`; o primeiro ativa o atributo `Secure` do cookie e o segundo restringe requisições de alteração ao domínio público configurado. O cookie também é `HttpOnly` e `SameSite=Strict`, os tokens de sessão são aleatórios e só seu hash fica no SQLite, e a sessão expira após sete dias. O app adiciona cabeçalhos básicos de segurança. Não exponha o serviço pela internet em HTTP simples.
 
-Variáveis: `PORT` (porta), `HOST` (interface; padrão `0.0.0.0`), `DB_PATH` (arquivo SQLite), `CHROME_PATH` (executável do Chrome), `CHROME_HEADLESS=auto|true|false` (padrão `auto`: ativa modo sem janela quando a VM não tem `DISPLAY`/`WAYLAND_DISPLAY`; use `true` para forçar modo sem janela ou `false` quando houver ambiente gráfico. Se o Acuttis exigir MFA/CAPTCHA, será necessário disponibilizar uma sessão gráfica remota), `APP_ORIGIN` (origem pública HTTPS obrigatória em produção) e `COOKIE_SECURE=true` (para ativar cookie Secure fora de `NODE_ENV=production`).
+Variáveis: `PORT` (porta), `HOST` (interface; padrão `0.0.0.0`), `DB_PATH` (arquivo SQLite), `APP_ORIGIN` (origem pública HTTPS obrigatória em produção) e `COOKIE_SECURE=true` (para ativar cookie Secure fora de `NODE_ENV=production`).
 
-O banco fica em `data/ponto.sqlite` e os perfis persistentes do Chromium em `data/chrome-profiles/<id-do-usuário>`. Ambos são ignorados pelo Git. Na primeira conta cadastrada após atualizar uma instalação existente, os dados do banco antigo são migrados para essa conta. Cadastre essa conta antes de divulgar o endereço aos demais usuários.
+O banco fica em `data/ponto.sqlite` e é ignorado pelo Git. Na primeira conta cadastrada após atualizar uma instalação existente, os dados do banco antigo são migrados para essa conta. Cadastre essa conta antes de divulgar o endereço aos demais usuários.
 
-O SQLite mantém as contas em `users`, as sessões em `user_sessions` e a conclusão individual do primeiro acesso em `user_onboarding`. Marcações, jornada, plantões e configurações Acuttis são sempre consultados com o identificador da conta autenticada.
+O SQLite mantém as contas em `users`, as sessões em `user_sessions` e a conclusão individual do primeiro acesso em `user_onboarding`. Marcações, jornada e plantões são sempre consultados com o identificador da conta autenticada.
 
 O ícone de configurações abre as preferências de jornada e a aba **Aparência**, onde é possível escolher o tema padrão do sistema, claro ou escuro, e definir a cor primária. Essas escolhas são salvas no navegador atual.
 
 ## Sincronizar com o Acuttis
 
-1. Em **Configurações → Acesso ao Acuttis**, salve seu usuário e senha. Depois clique em **Conectar Acuttis** e em **Abrir Acuttis**. O aplicativo abre um perfil próprio do Chromium.
-2. Se as credenciais estiverem salvas, o aplicativo envia o formulário oficial de login. Se o site exigir MFA ou CAPTCHA, conclua essa etapa na janela do Chromium. Quando o comprovante aparecer, os batimentos serão sincronizados automaticamente.
-3. O aplicativo busca páginas de 20 batimentos até o início do mês atual e repete a busca a cada cinco minutos enquanto o servidor estiver aberto.
+1. Carregue a pasta `extension/` no Chrome em `chrome://extensions` com o **Modo do desenvolvedor → Carregar sem compactação**.
+2. Nas opções da extensão, informe a origem usada para abrir o Meu Ponto e conceda acesso a esse endereço. Depois recarregue as abas do painel e do Acuttis.
+3. Abra o Acuttis no mesmo perfil do Chrome e faça login. No Meu Ponto, clique em **Sincronizar batimentos**. A extensão busca as páginas do mês atual e importa os registros para a conta conectada.
 
-O login em iframe não disponibiliza a sessão ao backend local, por causa da separação de origem dos navegadores. Por isso, o aplicativo usa uma janela do Chromium controlada pelo próprio monolito. Em **Configurações → Acesso ao Acuttis**, é possível salvar usuário e senha; ao abrir a janela, o aplicativo preenche e envia o formulário oficial do Acuttis e sincroniza os batimentos quando a sessão estiver pronta. MFA e CAPTCHA precisam ser concluídos manualmente.
-
-As senhas de usuário são armazenadas por hash scrypt. As credenciais Acuttis de cada usuário são cifradas com AES-256-GCM e guardadas na tabela `user_settings` do SQLite. A chave de 32 bytes é gerada localmente em `~/.config/controle-ponto-acuttis/credential.key` (ou `$XDG_CONFIG_HOME/controle-ponto-acuttis/credential.key`) com permissão restrita, fora do banco e do repositório. Faça backup dessa chave junto com o banco; sem ela, as credenciais salvas não podem ser recuperadas. Qualquer pessoa com acesso à conta do sistema que execute o aplicativo também pode ler essa chave. Nenhuma senha é devolvida pela API nem escrita nos logs.
+A sincronização é manual. A extensão só captura batimentos quando o usuário clica no botão do painel; não armazena senha, não executa sincronizações em segundo plano e não abre navegador no servidor. O processamento ocorre no perfil do Chrome do usuário e envia ao servidor somente `_id`, horário, fuso e origem das marcações. A extensão usa permissões de host do Acuttis e pede acesso apenas à origem do painel configurada pelo usuário.
 
 ## Plantões
 

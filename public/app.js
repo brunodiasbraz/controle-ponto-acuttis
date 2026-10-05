@@ -266,11 +266,9 @@ function render(data) {
     .join("");
   $("#sync-status").textContent = data.sync.lastError
     ? `Acuttis: ${data.sync.lastError}`
-    : data.sync.connecting
-      ? "Aguardando login no Chrome para sincronizar…"
-      : data.sync.lastSync
-        ? `Última sincronização: ${new Date(data.sync.lastSync).toLocaleString("pt-BR")} · automática a cada 5 min`
-        : "Ainda não sincronizado com o Acuttis";
+    : data.sync.lastSync
+      ? `Última sincronização manual: ${new Date(data.sync.lastSync).toLocaleString("pt-BR")}`
+      : "Ainda não sincronizado com o Acuttis. Use o botão Sincronizar.";
   if (!$("#settings-dialog").open) $("#tolerance").value = data.settings.tolerance;
 }
 async function refresh() {
@@ -301,7 +299,6 @@ $("#open-settings").addEventListener("click", () => {
   if (state?.settings) $("#tolerance").value = state.settings.tolerance;
   $("#settings-dialog").showModal();
   refreshSchedules("settings", state?.settings?.scheduleId).catch(error => message(error.message, "danger"));
-  loadAcuttisCredentials();
 });
 $("#settings-close").addEventListener("click", () => $("#settings-dialog").close());
 $("#settings-cancel").addEventListener("click", () => $("#settings-dialog").close());
@@ -314,8 +311,6 @@ $("#settings-dialog").addEventListener("close", () => {
   }
   initScheduleBuilder("settings");
   $("#settings-schedule-builder").hidden = true;
-  $("#acuttis-username").value = "";
-  $("#acuttis-password").value = "";
 });
 function selectSettingsTab(tab) {
   for (const name of ["work", "appearance", "acuttis", "account"]) {
@@ -363,57 +358,13 @@ $("#welcome-theme").addEventListener("change", (event) =>
 $("#welcome-primary-color").addEventListener("input", (event) =>
   saveAppearance({ primary: event.target.value }),
 );
-async function loadAcuttisCredentials() {
-  try {
-    const value = await api("/api/acuttis/credentials");
-    $("#acuttis-username").value = value.username;
-    $("#acuttis-password").value = "";
-    $("#credentials-status").textContent = value.configured
-      ? `Acesso salvo para ${value.username}. A senha permanece protegida no servidor.`
-      : "Nenhum acesso salvo. Informe suas credenciais para habilitar o login automático.";
-    $("#delete-acuttis-credentials").hidden = !value.configured;
-  } catch (error) {
-    $("#credentials-status").textContent = error.message;
-  }
+const ACUTTIS_SIGNIN = "https://app.acuttis.com.br/signin";
+function openAcuttisTab() {
+  const tab = window.open(ACUTTIS_SIGNIN, "_blank");
+  if (!tab) throw new Error("O navegador bloqueou a nova aba. Permita pop-ups para este endereço e tente novamente.");
+  try { tab.opener = null; } catch {}
+  return tab;
 }
-$("#save-acuttis-credentials").addEventListener("click", (event) =>
-  action(event.currentTarget, async () => {
-    const result = await api("/api/acuttis/credentials", {
-      method: "PUT",
-      body: JSON.stringify({ username: $("#acuttis-username").value, password: $("#acuttis-password").value }),
-    });
-    $("#acuttis-password").value = "";
-    $("#credentials-status").textContent = `Acesso salvo para ${result.username}. A senha permanece protegida no servidor.`;
-    $("#delete-acuttis-credentials").hidden = false;
-    message("Credenciais do Acuttis salvas com criptografia.", "success");
-  }),
-);
-$("#acuttis-username").addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    $("#acuttis-password").focus();
-  }
-});
-$("#acuttis-password").addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    $("#save-acuttis-credentials").click();
-  }
-});
-$("#delete-acuttis-credentials").addEventListener("click", (event) =>
-  action(event.currentTarget, async () => {
-    if (!confirm("Remover as credenciais do Acuttis salvas neste aplicativo?")) return;
-    await api("/api/acuttis/credentials", { method: "DELETE" });
-    $("#acuttis-username").value = "";
-    $("#acuttis-password").value = "";
-    $("#credentials-status").textContent = "Nenhum acesso salvo. Informe suas credenciais para habilitar o login automático.";
-    $("#delete-acuttis-credentials").hidden = true;
-    message("Credenciais do Acuttis removidas.", "success");
-  }),
-);
-$("#open-acuttis").addEventListener("click", () =>
-  $("#acuttis-dialog").showModal(),
-);
 document
   .querySelectorAll("[data-close-dialog]")
   .forEach((button) =>
@@ -421,23 +372,43 @@ document
       document.getElementById(button.dataset.closeDialog).close(),
     ),
   );
-$("#start-connection").addEventListener("click", (event) =>
-  action(event.currentTarget, async () => {
-    await api("/api/acuttis/open", { method: "POST" });
-    $("#connection-status").textContent =
-      "Se houver credenciais salvas, o login será preenchido automaticamente. Conclua eventual MFA ou CAPTCHA na janela aberta; depois a sincronização começa.";
-    await refresh();
-  }),
-);
+$("#open-acuttis").addEventListener("click", () => {
+  try { openAcuttisTab(); }
+  catch (error) { message(error.message, "danger"); }
+});
+$("#welcome-open-acuttis").addEventListener("click", () => {
+  try { openAcuttisTab(); $("#welcome-acuttis-status").textContent = "Acuttis aberto. Depois de entrar, volte para continuar."; }
+  catch (error) { $("#welcome-acuttis-status").textContent = error.message; }
+});
+function requestExtensionSync() {
+  const requestId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    let ackTimer, resultTimer;
+    const cleanup = () => { clearTimeout(ackTimer); clearTimeout(resultTimer); window.removeEventListener("message", onMessage); };
+    const onMessage = event => {
+      if (event.source !== window || event.origin !== location.origin || event.data?.channel !== "meu-ponto-extension-v1" || event.data.requestId !== requestId) return;
+      if (event.data.type === "ack") {
+        if (event.data.error || event.data.ok === false) { cleanup(); reject(new Error(event.data.error || "A extensão não conseguiu iniciar a sincronização.")); return; }
+        if (event.data.status === "opened-acuttis") { cleanup(); resolve({ openedAcuttis: true }); return; }
+        clearTimeout(ackTimer);
+        resultTimer = setTimeout(() => { cleanup(); reject(new Error("A sincronização demorou demais. Confira a aba do Acuttis e tente novamente.")); }, 120000);
+      }
+      if (event.data.type === "result") { cleanup(); resolve({ marks: event.data.marks, error: event.data.error }); }
+    };
+    window.addEventListener("message", onMessage);
+    ackTimer = setTimeout(() => { cleanup(); reject(new Error("Extensão do Chrome não detectada. Instale-a e configure o endereço deste painel nas opções da extensão.")); }, 1800);
+    window.postMessage({ channel: "meu-ponto-extension-v1", type: "sync", requestId }, location.origin);
+  });
+}
 $("#sync").addEventListener("click", (event) =>
   action(event.currentTarget, async () => {
-    const result = await api("/api/acuttis/sync", { method: "POST" });
-    message(
-      result.pending
-        ? "Aguardando login no Chrome. A sincronização continuará automaticamente."
-        : `${result.added} marcação(ões) nova(s) em ${result.pages} página(s).`,
-      result.pending ? "info" : "success",
-    );
+    const captured = await requestExtensionSync();
+    if (captured.openedAcuttis) { message("Abri o Acuttis em uma nova aba. Faça login e clique em Sincronizar novamente.", "info"); return; }
+    if (captured.error) throw new Error(captured.error);
+    if (!Array.isArray(captured.marks)) throw new Error("A extensão retornou uma resposta inválida.");
+    const result = await api("/api/import", { method: "POST", body: JSON.stringify({ source: "acuttis-extension", marks: captured.marks }) });
+    if (!Number.isInteger(result.added) || !Number.isInteger(result.received) || !result.syncedAt) throw new Error("O servidor não confirmou a importação dos batimentos.");
+    message(`${result.added} marcação(ões) nova(s) importada(s) de ${result.received} recebida(s).`, "success");
     await refresh();
   }),
 );
@@ -585,8 +556,6 @@ $("#settings").addEventListener("submit", (event) => {
   });
 });
 let onboardingStep = 1;
-let onboardingConfiguredCredentials = false;
-let onboardingWarning = "";
 
 function showWelcome() {
   $("#startup-screen").hidden = true;
@@ -621,7 +590,7 @@ function setWelcomeStep(step) {
   $("#welcome-next").hidden = step === 3;
   $("#welcome-finish").hidden = step !== 3;
   $("#welcome-next").textContent = step === 1
-    ? "Salvar acesso e continuar"
+    ? "Continuar"
     : "Salvar jornada e continuar";
   $("#welcome-error").hidden = true;
 }
@@ -648,11 +617,7 @@ async function initializeApp() {
       showDashboard();
       return;
     }
-    const credentials = await api("/api/acuttis/credentials");
     await refreshSchedules('welcome', data.settings.scheduleId);
-    onboardingConfiguredCredentials = credentials.configured;
-    $("#welcome-acuttis-username").value = credentials.username;
-    $("#welcome-acuttis-password").value = "";
     $("#welcome-tolerance").value = data.settings.tolerance;
     setWelcomeStep(1);
     showWelcome();
@@ -714,23 +679,7 @@ $("#welcome-next").addEventListener("click", async (event) => {
   button.disabled = true;
   $("#welcome-error").hidden = true;
   try {
-    if (onboardingStep === 1) {
-      const username = $("#welcome-acuttis-username").value.trim();
-      const password = $("#welcome-acuttis-password").value;
-      if (!username) throw new Error("Informe seu usuário do Acuttis.");
-      if (!password && !onboardingConfiguredCredentials) throw new Error("Informe sua senha do Acuttis.");
-      await api("/api/acuttis/credentials", {
-        method: "PUT",
-        body: JSON.stringify({ username, password }),
-      });
-      onboardingConfiguredCredentials = true;
-      $("#welcome-acuttis-password").value = "";
-      try {
-        await api("/api/acuttis/open", { method: "POST" });
-      } catch (error) {
-        onboardingWarning = `As credenciais foram salvas, mas não foi possível abrir o Chromium: ${error.message}`;
-      }
-    } else if (onboardingStep === 2) {
+    if (onboardingStep === 2) {
       const toleranceMinutes = Number($("#welcome-tolerance").value);
       if (!$("#welcome-schedule").value || !Number.isInteger(toleranceMinutes)) throw new Error("Selecione uma jornada e informe a tolerância.");
       await api('/api/work-schedules/assign', { method: 'PUT', body: JSON.stringify({ scheduleId: $('#welcome-schedule').value }) });
@@ -751,8 +700,7 @@ $("#welcome-finish").addEventListener("click", async (event) => {
     await api("/api/onboarding/complete", { method: "POST" });
     showDashboard();
     await refresh();
-    if (onboardingWarning) message(onboardingWarning, "info");
-    else message("Configuração concluída. Seu painel está pronto.", "success");
+    message("Configuração concluída. Seu painel está pronto.", "success");
   } catch (error) {
     welcomeError(error.message);
   } finally {
