@@ -1,5 +1,6 @@
 import { db, setting } from "./db.js";
 import { getUserSchedule, scheduleTarget } from './work-schedules.js';
+import { holidayName } from './holidays.js';
 import {
   addDays,
   datesBetween,
@@ -24,9 +25,11 @@ export function dashboard(month, today, userId) {
   );
 
   const tolerance = Number(setting(userId, "tolerance_minutes", "10"));
+  const breakMinutes = Number(setting(userId, "break_minutes", "60"));
+  const plannedStart = Number(setting(userId, "planned_start", "480"));
   const schedule = getUserSchedule(userId);
   const scheduledDay = date => schedule?.days.find(item => item.weekday === weekday(date));
-  const targetForDate = date => scheduleTarget(schedule, date) ?? defaultTarget(date);
+  const targetForDate = date => holidayName(date) ? 0 : (scheduleTarget(schedule, date) ?? defaultTarget(date));
 
   const overrides = new Map(
     db
@@ -44,11 +47,12 @@ export function dashboard(month, today, userId) {
   const shiftDays = new Map();
 
   for (const shift of shifts) {
+    const dutyHoliday = holidayName(shift.duty_date);
     shiftDays.set(shift.duty_date, {
       target: shift.duty_target_minutes,
       kind: "duty",
       shiftId: shift.id,
-      note: `Plantão · folga ${shift.day_off_date.slice(8, 10)}/${shift.day_off_date.slice(5, 7)}`,
+      note: `Plantão${dutyHoliday ? ` · ${dutyHoliday}` : ''} · folga ${shift.day_off_date.slice(8, 10)}/${shift.day_off_date.slice(5, 7)}`,
     });
     shiftDays.set(shift.day_off_date, {
       target: 0,
@@ -64,6 +68,10 @@ export function dashboard(month, today, userId) {
     )
     .all(userId, `${start} 00:00:00`, `${addDays(end, 1)} 00:00:00`);
 
+  const todayMarks = db
+    .prepare("SELECT id, mark_datetime, origin FROM marks WHERE user_id = ? AND mark_datetime >= ? AND mark_datetime < ? ORDER BY mark_datetime")
+    .all(userId, `${today} 00:00:00`, `${addDays(today, 1)} 00:00:00`);
+
   const byDay = new Map();
 
   for (const mark of allMarks) {
@@ -72,20 +80,30 @@ export function dashboard(month, today, userId) {
     byDay.get(date).push(mark);
   }
 
-  const days = datesBetween(start, end).map((date) => ({
-    ...dayStats(
+  const days = datesBetween(start, end).map((date) => {
+    const holiday = holidayName(date);
+    const override = overrides.get(date);
+    const shift = shiftDays.get(date);
+    const stats = dayStats(
       date,
       byDay.get(date) || [],
-      shiftDays.get(date)?.target ??
-        overrides.get(date)?.target_minutes ??
+      shift?.target ??
+        (holiday ? 0 : override?.target_minutes) ??
         targetForDate(date),
       tolerance,
-    ),
-    note: shiftDays.get(date)?.note || overrides.get(date)?.note || "",
-    shiftKind: shiftDays.get(date)?.kind || null,
-    shiftId: shiftDays.get(date)?.shiftId || null,
-    ids: (byDay.get(date) || []).map((mark) => mark.id),
-  }));
+    );
+    return {
+      ...stats,
+      note: shift?.note || (holiday ? holiday : override?.note) || "",
+      shiftKind: shift?.kind || null,
+      shiftId: shift?.shiftId || null,
+      isHoliday: !!holiday,
+      holidayName: holiday,
+      isCompensatoryOff: override?.kind === 'compensatory-off' && !holiday && !shift,
+      breakMinutes: scheduledDay(date)?.breakMinutes ?? breakMinutes,
+      ids: (byDay.get(date) || []).map((mark) => mark.id),
+    };
+  });
 
   const map = new Map(days.map((day) => [day.date, day]));
 
@@ -114,9 +132,6 @@ export function dashboard(month, today, userId) {
   const gap = days
     .filter((day) => day.date < today && day.target > 0 && !day.complete)
     .map((day) => day.date);
-
-  const breakMinutes = Number(setting(userId, "break_minutes", "60"));
-  const plannedStart = Number(setting(userId, "planned_start", "480"));
 
   function todayExitProjection() {
     if (today.slice(0, 7) !== month) return null;
@@ -217,9 +232,14 @@ export function dashboard(month, today, userId) {
       (day) =>
         day.marks.length > 0 ||
         (day.date === today && day.target > 0) ||
-        (day.shiftKind === "duty" && day.date >= today),
+        (day.shiftKind === "duty" && day.date >= today) ||
+        day.isCompensatoryOff,
     ),
     shifts,
+    lunch: {
+      marks: todayMarks.map(mark => mark.mark_datetime.slice(11, 16)),
+      breakMinutes: scheduledDay(today)?.breakMinutes ?? breakMinutes,
+    },
     settings: { breakMinutes, plannedStart, tolerance, scheduleName: schedule?.name || 'Equipe Dev', scheduleId: schedule?.id || 'equipe-dev' },
     summary: {
       worked: sum(monthToDate, "worked"),

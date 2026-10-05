@@ -77,6 +77,7 @@ db.exec(`
     date TEXT NOT NULL,
     target_minutes INTEGER NOT NULL,
     note TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'adjustment' CHECK(kind IN ('adjustment','compensatory-off')),
     PRIMARY KEY(user_id, date)
   );
   CREATE TABLE IF NOT EXISTS user_settings (
@@ -97,6 +98,9 @@ db.exec(`
   );
 `);
 
+if (!columns('day_settings').includes('kind'))
+  db.exec("ALTER TABLE day_settings ADD COLUMN kind TEXT NOT NULL DEFAULT 'adjustment'");
+
 db.prepare("INSERT OR IGNORE INTO work_schedules(id,name,is_builtin) VALUES('equipe-dev','Equipe Dev',1)").run();
 const devDay = db.prepare("INSERT OR IGNORE INTO work_schedule_days(schedule_id,weekday,start_minute,end_minute,break_minutes) VALUES('equipe-dev',?,?,?,60)");
 for (const day of [1, 2, 3, 4]) devDay.run(day, 480, 1080);
@@ -111,6 +115,10 @@ export function setting(userId, key, fallback) {
 
 export function saveSetting(userId, key, value) {
   db.prepare('INSERT INTO user_settings(user_id,key,value) VALUES(?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value').run(userId, key, String(value));
+}
+
+export function deleteCompensatoryDayOff(userId, date) {
+  return db.prepare("DELETE FROM day_settings WHERE user_id = ? AND date = ? AND kind = 'compensatory-off'").run(userId, date).changes > 0;
 }
 
 export function claimLegacyData(userId) {

@@ -62,10 +62,63 @@ test('plantão com folga na sexta tem 8h e a tabela inclui o plantão futuro', a
   assert.equal(result.days.some(day => day.date === '2026-10-05'), false);
   assert.equal(result.days.some(day => day.date === '2026-10-09'), false);
   assert.equal(result.shifts[0].day_off_date, '2026-10-09');
-  assert.equal(result.summary.monthTarget, 193 * 60);
+  assert.equal(result.summary.monthTarget, 193 * 60 - 540); // Dia 12 é feriado nacional
   const beforeFolga = dashboard('2026-10', '2026-10-08', userId);
   assert.equal(beforeFolga.projections.friday.dayOff, true);
   assert.equal(beforeFolga.projections.friday.exit, null);
+});
+
+test('feriados nacionais não geram jornada e um plantão provisionado no feriado volta a ter jornada', async () => {
+  const { db } = await import('../src/db.js');
+  const { dashboard } = await import('../src/dashboard.js');
+  const { holidayName } = await import('../src/holidays.js');
+  const { datesBetween, defaultTarget } = await import('../src/calc.js');
+  const userId = 'holiday-calendar-user';
+  db.prepare('INSERT INTO users(id,username,password_hash) VALUES(?,?,?)').run(userId, userId, 'test');
+  assert.equal(holidayName('2026-04-03'), 'Paixão de Cristo');
+  assert.equal(holidayName('2026-06-04'), 'Corpus Christi');
+  assert.equal(holidayName('2027-03-26'), 'Paixão de Cristo');
+  assert.equal(holidayName('2027-05-27'), 'Corpus Christi');
+  const withoutDuty = dashboard('2026-04', '2026-04-30', userId);
+  const scheduledApril = datesBetween('2026-04-01', '2026-04-30').reduce((sum, date) => sum + defaultTarget(date), 0);
+  const aprilHolidayTarget = datesBetween('2026-04-01', '2026-04-30')
+    .filter(date => holidayName(date))
+    .reduce((sum, date) => sum + defaultTarget(date), 0);
+  assert.equal(withoutDuty.summary.monthTarget, scheduledApril - aprilHolidayTarget);
+  db.prepare('INSERT INTO shift_provisions(user_id,duty_date,day_off_date,duty_target_minutes) VALUES(?,?,?,?)').run(userId, '2026-04-03', '2026-04-06', 540);
+  const withDuty = dashboard('2026-04', '2026-04-01', userId);
+  const duty = withDuty.days.find(day => day.date === '2026-04-03');
+  assert.equal(duty.target, 540);
+  assert.equal(duty.isHoliday, true);
+  assert.match(duty.note, /Paixão de Cristo/);
+  assert.equal(withDuty.summary.monthTarget, withoutDuty.summary.monthTarget); // A folga compensatória reduz a mesma jornada que o plantão repõe.
+});
+
+test('folga compensatória zera a jornada prevista e não cria saldo devedor', async () => {
+  const { db } = await import('../src/db.js');
+  const { dashboard } = await import('../src/dashboard.js');
+  const userId = 'compensatory-leave-user';
+  db.prepare('INSERT INTO users(id,username,password_hash) VALUES(?,?,?)').run(userId, userId, 'test');
+  db.prepare("INSERT INTO day_settings(user_id,date,target_minutes,note,kind) VALUES(?,? ,0,'Folga compensatória','compensatory-off')").run(userId, '2026-10-05');
+  const result = dashboard('2026-10', '2026-10-30', userId);
+  const leave = result.days.find(day => day.date === '2026-10-05');
+  assert.equal(leave.target, 0);
+  assert.equal(leave.isCompensatoryOff, true);
+  assert.equal(leave.balance, 0);
+  assert.equal(leave.note, 'Folga compensatória');
+  assert.equal(result.summary.monthTarget, 193 * 60 - 540 - 540);
+});
+
+test('folga compensatória pode ser excluída apenas pela conta proprietária', async () => {
+  const { db, deleteCompensatoryDayOff } = await import('../src/db.js');
+  const owner = 'leave-owner';
+  const other = 'leave-other';
+  db.prepare('INSERT INTO users(id,username,password_hash) VALUES(?,?,?)').run(owner, owner, 'test');
+  db.prepare('INSERT INTO users(id,username,password_hash) VALUES(?,?,?)').run(other, other, 'test');
+  db.prepare("INSERT INTO day_settings(user_id,date,target_minutes,note,kind) VALUES(?,? ,0,'Folga compensatória','compensatory-off')").run(owner, '2026-10-06');
+  assert.equal(deleteCompensatoryDayOff(other, '2026-10-06'), false);
+  assert.equal(deleteCompensatoryDayOff(owner, '2026-10-06'), true);
+  assert.equal(deleteCompensatoryDayOff(owner, '2026-10-06'), false);
 });
 
 test('contas isolam senhas, sessões, configurações e batimentos', async () => {
@@ -110,7 +163,12 @@ test('jornadas compartilhadas calculam média com sábado alternado e aplicam o 
   assert.equal(shared.weeklyAverageMinutes, 2715); // 45h15 por semana
   assert.equal(shared.monthlyAverageMinutes, 11765);
   const { dashboard } = await import('../src/dashboard.js');
-  assert.equal(dashboard('2026-10', '2026-10-01', userId).summary.monthTarget, 12210);
+  assert.equal(dashboard('2026-10', '2026-10-01', userId).summary.monthTarget, 12210 - 510);
+  db.prepare('INSERT INTO marks(user_id,id,mark_datetime) VALUES(?,?,?)').run(userId, 'lunch-in', '2026-10-03 08:00:00');
+  db.prepare('INSERT INTO marks(user_id,id,mark_datetime) VALUES(?,?,?)').run(userId, 'lunch-out', '2026-10-03 12:00:00');
+  const lunch = dashboard('2026-09', '2026-10-03', userId).lunch;
+  assert.deepEqual(lunch.marks, ['08:00', '12:00']);
+  assert.equal(lunch.breakMinutes, 30);
   const other = 'other-schedule-user';
   db.prepare('INSERT INTO users(id,username,password_hash) VALUES(?,?,?)').run(other, other, 'test');
   assignSchedule(other, schedule.id);

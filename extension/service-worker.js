@@ -6,11 +6,6 @@ chrome.runtime.onInstalled.addListener(details => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type === 'install-acuttis-hook' && sender.tab?.id !== undefined) {
-    chrome.scripting.executeScript({ target: { tabId: sender.tab.id }, files: ['acuttis-hook.js'], world: 'MAIN' })
-      .then(() => sendResponse({ ok: true }), error => sendResponse({ ok: false, error: error.message }));
-    return true;
-  }
   if (message?.type === 'app-sync-request') {
     handleSyncRequest(message, sender).then(sendResponse, error => sendResponse({ ok: false, error: error.message }));
     return true;

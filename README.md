@@ -37,6 +37,10 @@ A sincronização é manual. A extensão só captura batimentos quando o usuári
 
 Clique em **Provisionar plantão** e informe a data do plantão e a folga, que pode ocorrer antes ou depois dele. As duas datas devem ser diferentes, e a folga precisa cair de segunda a sexta. Se a folga cair na sexta, a jornada do plantão será de 8h; nos demais dias úteis, será de 9h. O dia de folga terá jornada prevista de 0h. É possível excluir o provisionamento pelo painel. A tabela mostra dias com batimentos, o dia atual em aberto e os plantões futuros provisionados.
 
+O calendário retira automaticamente da jornada os feriados da lista informada para 2026 e repete as datas fixas nos demais anos; Paixão de Cristo e Corpus Christi são calculados pelo calendário da Páscoa. Corpus Christi está incluído conforme a regra da empresa. Um plantão provisionado em um feriado volta a contar com a carga horária do plantão. A folga prevista do plantão deve ser um dia útil que não seja feriado.
+
+Use o ícone **Registrar folga compensatória** para marcar uma folga paga pelo banco de horas. O dia fica com jornada prevista de 0h, aparece na tabela e não gera saldo devedor. Não é necessário lançar batimentos nesse dia. Para remover o registro, abra o dia na tabela e clique em **Excluir folga**.
+
 O arquivo JSON pode ser importado para a conta autenticada pelo botão **Importar JSON**. Pela linha de comando, defina o nome do usuário:
 
 ```bash
@@ -47,7 +51,7 @@ Importações são idempotentes pelo `_id` do Acuttis. As marcações locais sã
 
 ## Cálculos
 
-- Jornada padrão: segunda a quinta 9h, sexta 8h, sábado e domingo 0h. Ajuste feriados, folgas e outras exceções clicando no dia.
+- Jornada padrão: segunda a quinta 9h, sexta 8h, sábado e domingo 0h. Feriados nacionais e folgas compensatórias ficam fora da jornada; outras exceções podem ser ajustadas clicando no dia.
 - Trabalho do dia: soma de pares de batimentos (entrada → saída). Um dia de jornada integral só é considerado fechado após quatro batimentos; assim, intervalos e marcações faltantes não geram previsões falsamente precisas.
 - Saldo: horas trabalhadas menos jornada prevista. A tolerância diária é de 10 minutos por padrão, como nos exemplos da planilha: diferenças de até 10 minutos não entram no saldo. Esse valor pode ser ajustado nas preferências. Os cartões de saldo incluem apenas dias fechados.
 - Sexta: a previsão usa o saldo desde o começo da semana ou desde o começo do mês, o que vier depois. A saída estimada é a hora necessária para zerar esse saldo, com o almoço previsto quando ainda não foi batido.

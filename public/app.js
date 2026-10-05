@@ -54,6 +54,21 @@ $("#month").value = today.slice(0, 7);
 
 const appearanceKey = "controle-ponto.appearance";
 const defaultAppearance = { theme: "system", primary: "#2267a5" };
+const lunchNoticeKey = () => `controle-ponto.lunch-notice.${encodeURIComponent(authUsername.toLowerCase())}`;
+const defaultLunchNotice = "Almoço! Término em {tempo} (às {horario})";
+function readLunchNotice() {
+  try { return localStorage.getItem(lunchNoticeKey())?.trim() || defaultLunchNotice; }
+  catch { return defaultLunchNotice; }
+}
+let lunchNoticeTemplate = readLunchNotice();
+function saveLunchNotice(value) {
+  const trimmed = value.trim().slice(0, 140);
+  lunchNoticeTemplate = trimmed || defaultLunchNotice;
+  try {
+    if (trimmed) localStorage.setItem(lunchNoticeKey(), trimmed);
+    else localStorage.removeItem(lunchNoticeKey());
+  } catch {}
+}
 function readAppearance() {
   try {
     const saved = JSON.parse(localStorage.getItem(appearanceKey) || "{}");
@@ -199,8 +214,36 @@ function todayProjection(item) {
   const detail = `Jornada: ${fmt(item.target)} · trabalhadas: ${fmt(item.worked)}.`;
   return `<div class="col-12 col-lg-4"><div class="card border-0 shadow-sm h-100"><div class="card-body p-4">${header}<div class="projection-value mt-2">${output}</div><div class="small text-secondary">${status} · ${detail}</div><div class="small primary-note mt-2">${overtime}</div></div></div></div>`;
 }
+function renderLunchNotice(lunch) {
+  const lunchNotice = $("#lunch-notice");
+  const isLunch = lunch?.marks.length === 2;
+  lunchNotice.classList.toggle("d-none", !isLunch);
+  if (isLunch) {
+    const [hour, minute] = lunch.marks[1].split(":").map(Number);
+    const finishAt = hour * 60 + minute + (lunch.breakMinutes ?? 60);
+    const currentParts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "America/Sao_Paulo",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date());
+    const currentMinutes = Number(currentParts.find(part => part.type === "hour").value) * 60
+      + Number(currentParts.find(part => part.type === "minute").value);
+    const remaining = Math.max(0, finishAt - currentMinutes);
+    const remainingHours = Math.floor(remaining / 60);
+    const remainingMinutes = remaining % 60;
+    const countdown = remainingHours
+      ? `${remainingHours}h${remainingMinutes ? ` ${remainingMinutes}min` : ""}`
+      : `${remainingMinutes} min`;
+    const finishClock = `${String(Math.floor((finishAt % 1440) / 60)).padStart(2, "0")}:${String(finishAt % 60).padStart(2, "0")}`;
+    $("#lunch-notice-text").textContent = lunchNoticeTemplate
+      .replaceAll("{tempo}", countdown)
+      .replaceAll("{horario}", finishClock);
+  }
+}
 function render(data) {
   state = data;
+  renderLunchNotice(data.lunch);
   const s = data.summary;
   $("#summary").innerHTML =
     metric(
@@ -258,9 +301,13 @@ function render(data) {
       const badge =
         day.shiftKind === "duty"
           ? '<span class="badge  badge-soft mx-3">Plantão</span>'
-          : partial
-            ? '<span class="badge badge-soft-dark mx-3">Em aberto</span>'
-            : "";
+          : day.isCompensatoryOff
+            ? '<span class="badge badge-soft mx-3">Folga compensatória</span>'
+            : day.isHoliday
+              ? '<span class="badge badge-soft mx-3">Feriado</span>'
+              : partial
+                ? '<span class="badge badge-soft-dark mx-3">Em aberto</span>'
+                : "";
       return `<tr data-date="${day.date}" class="${day.date === data.today ? "today" : ""}"><td><strong>${dateLabel(day.date)}</strong> <span class="text-secondary">${dow}</span>${badge}</td><td>${fmt(day.target)}</td><td>${day.marks.length ? day.marks.map((time) => `<span class="punch">${time}</span>`).join("") : '<span class="text-secondary">—</span>'}</td><td>${isFuture ? "—" : fmt(day.worked)}</td><td class="${!isFuture && !partial ? balanceClass(day.balance) : ""}">${isFuture || partial || day.marks.length === 0 ? "—" : fmt(day.balance)}</td><td class="text-secondary">${escapeHtml(day.note)}</td></tr>`;
     })
     .join("");
@@ -313,7 +360,7 @@ $("#settings-dialog").addEventListener("close", () => {
   $("#settings-schedule-builder").hidden = true;
 });
 function selectSettingsTab(tab) {
-  for (const name of ["work", "appearance", "acuttis", "account"]) {
+  for (const name of ["work", "appearance", "notices", "acuttis", "account"]) {
     const selected = name === tab;
     $(`#tab-${name}`).classList.toggle("active", selected);
     $(`#tab-${name}`).setAttribute("aria-selected", String(selected));
@@ -325,10 +372,11 @@ $("#tab-work").addEventListener("click", () => selectSettingsTab("work"));
 $("#tab-appearance").addEventListener("click", () =>
   selectSettingsTab("appearance"),
 );
+$("#tab-notices").addEventListener("click", () => selectSettingsTab("notices"));
 $("#tab-acuttis").addEventListener("click", () => selectSettingsTab("acuttis"));
 $("#tab-account").addEventListener("click", () => selectSettingsTab("account"));
 $(".settings-tabs").addEventListener("keydown", (event) => {
-  const tabs = [$("#tab-work"), $("#tab-appearance"), $("#tab-acuttis"), $("#tab-account")];
+  const tabs = [$("#tab-work"), $("#tab-appearance"), $("#tab-notices"), $("#tab-acuttis"), $("#tab-account")];
   const current = tabs.indexOf(document.activeElement);
   if (current < 0) return;
   const next =
@@ -349,6 +397,14 @@ $(".settings-tabs").addEventListener("keydown", (event) => {
 $("#theme-choice").addEventListener("change", (event) =>
   saveAppearance({ theme: event.target.value }),
 );
+$("#lunch-notice-template").value = lunchNoticeTemplate;
+$("#lunch-notice-template").addEventListener("input", event => {
+  saveLunchNotice(event.target.value);
+  renderLunchNotice(state?.lunch);
+});
+$("#lunch-notice-template").addEventListener("blur", event => {
+  if (!event.target.value.trim()) event.target.value = defaultLunchNotice;
+});
 $("#primary-color").addEventListener("input", (event) =>
   saveAppearance({ primary: event.target.value }),
 );
@@ -391,7 +447,7 @@ function requestExtensionSync() {
         if (event.data.error || event.data.ok === false) { cleanup(); reject(new Error(event.data.error || "A extensão não conseguiu iniciar a sincronização.")); return; }
         if (event.data.status === "opened-acuttis") { cleanup(); resolve({ openedAcuttis: true }); return; }
         clearTimeout(ackTimer);
-        resultTimer = setTimeout(() => { cleanup(); reject(new Error("A sincronização demorou demais. Confira a aba do Acuttis e tente novamente.")); }, 120000);
+        resultTimer = setTimeout(() => { cleanup(); reject(new Error("A extensão iniciou, mas não retornou resposta do Acuttis. Recarregue a extensão em chrome://extensions, recarregue a aba do Acuttis e tente novamente.")); }, 40000);
       }
       if (event.data.type === "result") { cleanup(); resolve({ marks: event.data.marks, error: event.data.error }); }
     };
@@ -490,9 +546,10 @@ $("#days").addEventListener("click", (event) => {
   $("#day-target").value =
     `${String(Math.floor(day.target / 60)).padStart(2, "0")}:${String(day.target % 60).padStart(2, "0")}`;
   $("#day-note").value = day.note;
-  $("#day-target").disabled = !!day.shiftKind;
-  $("#day-note").disabled = !!day.shiftKind;
-  $("#save-day").disabled = !!day.shiftKind;
+  $("#day-target").disabled = !!day.shiftKind || day.isHoliday;
+  $("#day-note").disabled = !!day.shiftKind || day.isHoliday;
+  $("#save-day").disabled = !!day.shiftKind || day.isHoliday;
+  $("#delete-day-off").classList.toggle("d-none", !day.isCompensatoryOff);
   $("#new-mark").value = "";
   $("#mark-list").innerHTML = day.marks
     .map(
@@ -515,6 +572,28 @@ $("#save-day").addEventListener("click", (event) =>
     });
     $("#day-dialog").close();
     message("Jornada do dia salva.", "success");
+    await refresh();
+  }),
+);
+$("#delete-day-off").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    await api(`/api/day-off/${encodeURIComponent(selectedDate)}`, { method: "DELETE" });
+    $("#day-dialog").close();
+    message("Registro de folga removido.", "success");
+    await refresh();
+  }),
+);
+$("#new-day-off").addEventListener("click", () => {
+  $("#compensatory-date").value = today;
+  $("#day-off-dialog").showModal();
+});
+$("#save-day-off").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    const date = $("#compensatory-date").value;
+    if (!date) throw new Error("Informe a data da folga.");
+    await api("/api/day-off", { method: "POST", body: JSON.stringify({ date }) });
+    $("#day-off-dialog").close();
+    message("Folga compensatória registrada. A data não contará como saldo devedor.", "success");
     await refresh();
   }),
 );
@@ -608,6 +687,8 @@ async function initializeApp() {
       return;
     }
     authUsername = auth.user.username;
+    lunchNoticeTemplate = readLunchNotice();
+    $("#lunch-notice-template").value = lunchNoticeTemplate;
     const [data, onboarding] = await Promise.all([
       api(`/api/dashboard?month=${encodeURIComponent(today.slice(0, 7))}`),
       api("/api/onboarding"),

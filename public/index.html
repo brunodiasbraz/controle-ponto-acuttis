@@ -109,6 +109,12 @@
             Batimentos, saldos e hora de saída em um só lugar.
           </p>
         </div>
+        <div id="lunch-notice" class="lunch-notice d-none" role="status" aria-live="polite">
+          <svg class="lunch-notice-icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 3v7M3.5 3v4a2.5 2.5 0 0 0 5 0V3M6 9v12M17 3v18M17 3c2.2 2 3 4.6 3 7h-3" />
+          </svg>
+          <span id="lunch-notice-text">Almoço, término previsto em breve.</span>
+        </div>
         <div class="d-flex gap-2 flex-wrap align-items-center">
           <span class="tooltip-wrap">
             <button
@@ -184,6 +190,19 @@
                 <path d="M16 3v4M8 3v4M3 10h18M12 13v5m-2.5-2.5h5" />
               </svg></button
             ><span class="tooltip-text">Provisionar plantão</span>
+          </span>
+          <span class="tooltip-wrap">
+            <button
+              id="new-day-off"
+              class="icon-button"
+              type="button"
+              aria-label="Registrar folga compensatória"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="5" width="18" height="16" rx="2" />
+                <path d="M16 3v4M8 3v4M3 10h18M8 15h8" />
+              </svg></button
+            ><span class="tooltip-text">Registrar folga compensatória</span>
           </span>
           <span class="tooltip-wrap">
             <button
@@ -288,6 +307,7 @@
         <div class="settings-tabs" role="tablist" aria-label="Seções de configuração">
           <button id="tab-work" class="settings-tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-work">Minha jornada</button>
           <button id="tab-appearance" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-appearance">Aparência</button>
+          <button id="tab-notices" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-notices">Avisos</button>
           <button id="tab-acuttis" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-acuttis">Sincronização</button>
           <button id="tab-account" class="settings-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-account">Conta</button>
         </div>
@@ -330,6 +350,13 @@
               <span id="primary-color-value" class="small text-secondary">#2267A5</span>
             </div>
             <div class="form-text">A cor é aplicada imediatamente e salva neste navegador.</div>
+          </div>
+        </section>
+        <section id="panel-notices" class="settings-panel" role="tabpanel" aria-labelledby="tab-notices" hidden>
+          <div class="mb-3 mt-3">
+            <label for="lunch-notice-template" class="form-label">Mensagem durante o intervalo</label>
+            <input id="lunch-notice-template" class="form-control" type="text" maxlength="140" autocomplete="off" />
+            <div class="form-text">Use <code>{tempo}</code> para o tempo restante e <code>{horario}</code> para a hora prevista de término. Salvo automaticamente neste navegador.</div>
           </div>
         </section>
         <section id="panel-acuttis" class="settings-panel" role="tabpanel" aria-labelledby="tab-acuttis" hidden>
@@ -379,6 +406,8 @@
         <div class="d-flex gap-2 mt-3">
           <button id="save-day" class="btn btn-primary" type="button">
             Salvar dia</button
+          ><button id="delete-day-off" class="btn btn-outline-danger d-none" type="button">
+            Excluir folga</button
           ><button class="btn btn-outline-secondary" value="cancel">
             Fechar
           </button>
@@ -427,6 +456,21 @@
           ><button class="btn btn-outline-secondary" type="button" data-close-dialog="shift-dialog">
             Cancelar
           </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="day-off-dialog" class="day-dialog">
+      <form method="dialog" class="p-4">
+        <div class="d-flex justify-content-between align-items-center">
+          <h2 class="h5 mb-0">Registrar folga compensatória</h2>
+          <button class="btn-close" type="button" data-close-dialog="day-off-dialog" aria-label="Fechar"></button>
+        </div>
+        <p class="small text-secondary mt-2">A data ficará sem jornada prevista e não gerará saldo devedor.</p>
+        <label class="form-label" for="compensatory-date">Data da folga</label>
+        <input id="compensatory-date" type="date" class="form-control" required />
+        <div class="d-flex gap-2 mt-3">
+          <button id="save-day-off" type="button" class="btn btn-primary">Registrar folga</button>
+          <button class="btn btn-outline-secondary" type="button" data-close-dialog="day-off-dialog">Cancelar</button>
         </div>
       </form>
     </dialog>

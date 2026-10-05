@@ -12,5 +12,3 @@ window.addEventListener('message', event => {
     marks: event.data.marks, error: event.data.error
   }).catch(() => {});
 });
-
-chrome.runtime.sendMessage({ type: 'install-acuttis-hook' }).catch(() => {});

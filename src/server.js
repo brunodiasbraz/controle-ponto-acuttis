@@ -1,11 +1,12 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
-import { completeOnboarding, db, importMarks, onboardingComplete, saveSetting, setting } from './db.js';
+import { completeOnboarding, db, deleteCompensatoryDayOff, importMarks, onboardingComplete, saveSetting, setting } from './db.js';
 import { dashboard } from './dashboard.js';
 import { localDate, minutes, shiftTargetForDayOff, weekday } from './calc.js';
 import { authenticate, createSession, deleteSession, getSession, register, sessionMaxAge } from './auth.js';
 import { assignSchedule, createSchedule, getSchedule, scheduleList } from './work-schedules.js';
+import { holidayName } from './holidays.js';
 
 const port = Number(process.env.PORT || 3000);
 const publicRoot = resolve('public');
@@ -118,7 +119,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (req.method === 'POST' && url.pathname === '/api/shifts') {
         const input = await body(req);
-        if (!validDate(input.dutyDate) || !validDate(input.dayOffDate) || input.dayOffDate === input.dutyDate || ![1, 2, 3, 4, 5].includes(weekday(input.dayOffDate))) throw Object.assign(new Error('Informe datas diferentes para o plantão e a folga, que deve cair de segunda a sexta.'), { status: 400 });
+        if (!validDate(input.dutyDate) || !validDate(input.dayOffDate) || input.dayOffDate === input.dutyDate || ![1, 2, 3, 4, 5].includes(weekday(input.dayOffDate)) || holidayName(input.dayOffDate)) throw Object.assign(new Error('Informe datas diferentes e escolha para a folga um dia útil que não seja feriado.'), { status: 400 });
         const conflict = db.prepare('SELECT id FROM shift_provisions WHERE user_id = ? AND (duty_date IN (?,?) OR day_off_date IN (?,?))').get(userId, input.dutyDate, input.dayOffDate, input.dutyDate, input.dayOffDate);
         if (conflict) throw Object.assign(new Error('Uma dessas datas já pertence a outro plantão.'), { status: 409 });
         const targetMinutes = shiftTargetForDayOff(input.dayOffDate);
@@ -134,8 +135,23 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'PUT' && url.pathname === '/api/day') {
         const input = await body(req);
         if (!validDate(input.date) || !Number.isInteger(input.targetMinutes) || input.targetMinutes < 0 || input.targetMinutes > 1440 || String(input.note || '').length > 200) throw Object.assign(new Error('Dados do dia inválidos.'), { status: 400 });
-        db.prepare('INSERT INTO day_settings(user_id,date,target_minutes,note) VALUES(?,?,?,?) ON CONFLICT(user_id,date) DO UPDATE SET target_minutes=excluded.target_minutes,note=excluded.note').run(userId, input.date, input.targetMinutes, input.note || '');
+        db.prepare("INSERT INTO day_settings(user_id,date,target_minutes,note,kind) VALUES(?,?,?,?,'adjustment') ON CONFLICT(user_id,date) DO UPDATE SET target_minutes=excluded.target_minutes,note=excluded.note,kind='adjustment'").run(userId, input.date, input.targetMinutes, input.note || '');
         return json(res, 200, { ok: true });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/day-off') {
+        const input = await body(req);
+        if (!validDate(input.date)) throw Object.assign(new Error('Data da folga inválida.'), { status: 400 });
+        if (holidayName(input.date)) throw Object.assign(new Error('Essa data já é feriado e não gera jornada prevista.'), { status: 409 });
+        const conflict = db.prepare('SELECT id FROM shift_provisions WHERE user_id = ? AND (duty_date = ? OR day_off_date = ?)').get(userId, input.date, input.date);
+        if (conflict) throw Object.assign(new Error('Essa data já está vinculada a um plantão.'), { status: 409 });
+        db.prepare("INSERT INTO day_settings(user_id,date,target_minutes,note,kind) VALUES(?,?,0,'Folga compensatória','compensatory-off') ON CONFLICT(user_id,date) DO UPDATE SET target_minutes=0,note='Folga compensatória',kind='compensatory-off'").run(userId, input.date);
+        return json(res, 201, { ok: true, date: input.date });
+      }
+      if (req.method === 'DELETE' && url.pathname.startsWith('/api/day-off/')) {
+        const date = decodeURIComponent(url.pathname.slice('/api/day-off/'.length));
+        if (!validDate(date)) throw Object.assign(new Error('Data da folga inválida.'), { status: 400 });
+        const removed = deleteCompensatoryDayOff(userId, date);
+        return json(res, removed ? 200 : 404, { ok: removed });
       }
       if (req.method === 'PUT' && url.pathname === '/api/settings') {
         const input = await body(req);

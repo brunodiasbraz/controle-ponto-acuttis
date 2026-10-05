@@ -73,8 +73,15 @@
       const request = this.__meuPontoRequest;
       if (!request || !activeRequest || !request.url.startsWith(API)) return;
       let response;
-      try { response = new Response(this.responseText, { status: this.status }); }
-      catch { return; }
+      try {
+        const body = this.responseType === 'json' ? JSON.stringify(this.response) : this.responseText;
+        response = new Response(body, { status: this.status || 200 });
+      } catch (error) {
+        const requestId = activeRequest;
+        activeRequest = null;
+        window.postMessage({ channel: CHANNEL, type: 'result', requestId, marks: [], error: `Não consegui ler a resposta de batimentos do Acuttis: ${error.message}` }, location.origin);
+        return;
+      }
       void handleResponse(request.url, request.headers, 'include', response);
     }, { once: true });
     return xhrSend.apply(this, args);
@@ -87,21 +94,31 @@
   }
   async function requestProof(requestId) {
     activeRequest = requestId;
-    const deadline = Date.now() + 20000;
-    let clicked = false;
+    const deadline = Date.now() + 15000;
+    let clickedFirst = false;
     while (Date.now() < deadline && activeRequest === requestId) {
       const controls = proofControls();
       if (controls.length) {
-        const first = controls[0]; first.click(); clicked = true;
-        await new Promise(resolve => setTimeout(resolve, 350));
-        const refreshed = proofControls();
-        const second = refreshed.at(-1);
-        if (second) second.click();
+        const first = controls[0];
+        first.click();
+        clickedFirst = true;
+        const secondDeadline = Date.now() + 8000;
+        let clickedSecond = false;
+        while (Date.now() < secondDeadline && activeRequest === requestId) {
+          await new Promise(resolve => setTimeout(resolve, 250));
+          const second = proofControls().find(node => node !== first);
+          if (second) { second.click(); clickedSecond = true; break; }
+        }
+        if (!clickedSecond && activeRequest === requestId) {
+          activeRequest = null;
+          window.postMessage({ channel: CHANNEL, type: 'result', requestId, marks: [], error: 'Encontrei o primeiro “Comprovante de ponto”, mas não apareceu a confirmação. Abra manualmente essa seção no Acuttis e tente sincronizar novamente.' }, location.origin);
+          return;
+        }
         break;
       }
       await new Promise(resolve => setTimeout(resolve, 250));
     }
-    if (!clicked && activeRequest === requestId) {
+    if (!clickedFirst && activeRequest === requestId) {
       activeRequest = null;
       window.postMessage({ channel: CHANNEL, type: 'result', requestId, marks: [], error: 'Não encontrei “Comprovante de ponto” na aba do Acuttis. Faça login, abra essa seção e tente novamente.' }, location.origin);
       return;
@@ -109,9 +126,9 @@
     setTimeout(() => {
       if (activeRequest === requestId) {
         activeRequest = null;
-        window.postMessage({ channel: CHANNEL, type: 'result', requestId, marks: [], error: 'O Acuttis não carregou os batimentos. Confirme que está logado e tente sincronizar novamente.' }, location.origin);
+        window.postMessage({ channel: CHANNEL, type: 'result', requestId, marks: [], error: 'Os botões do comprovante foram acionados, mas a requisição de batimentos não apareceu em 25 segundos. Confirme que está logado, abra “Comprovante de ponto” manualmente e tente sincronizar novamente.' }, location.origin);
       }
-    }, 120000);
+    }, 25000);
   }
 
   window.addEventListener('message', event => {
