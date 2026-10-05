@@ -79,9 +79,16 @@ export async function openBrowser(userId) {
     return { opened: true, connecting: !!state.connectTask };
   }
   const profile = resolve("data/chrome-profiles", userId);
+  const headlessSetting = (process.env.CHROME_HEADLESS || "auto").toLowerCase();
+  if (!["auto", "true", "false"].includes(headlessSetting))
+    throw new Error("CHROME_HEADLESS deve ser 'auto', 'true' ou 'false'.");
+  const hasDisplay = Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+  if (headlessSetting === "false" && !hasDisplay)
+    throw new Error("CHROME_HEADLESS=false exige um ambiente gráfico (DISPLAY/WAYLAND_DISPLAY). Na VM sem desktop, use CHROME_HEADLESS=true ou auto.");
+  const headless = headlessSetting === "true" || (headlessSetting === "auto" && !hasDisplay);
   const context = await chromium.launchPersistentContext(profile, {
     executablePath: process.env.CHROME_PATH || "/usr/bin/google-chrome",
-    headless: process.env.CHROME_HEADLESS === "true",
+    headless,
     viewport: { width: 1200, height: 800 },
     args: ["--no-first-run"],
   });
