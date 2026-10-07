@@ -12,28 +12,15 @@
       if (Array.isArray(value)) return value;
     throw new Error('Resposta do Acuttis em formato não reconhecido.');
   }
-  function monthStart() {
-    const parts = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit' }).format(new Date());
-    return `${parts}-01`;
-  }
-  async function collect(url, headers, credentials, firstRows) {
-    const start = monthStart(), all = [], seen = new Set();
-    let offset = 0, rows = firstRows;
-    for (let page = 0; page < 100; page++) {
-      if (!rows.length) break;
-      for (const row of rows) if (row?._id && !seen.has(row._id)) { seen.add(row._id); all.push(row); }
-      if (rows.length < 20 || rows.some(row => typeof row.mark_datetime === 'string' && row.mark_datetime.slice(0, 10) < start)) break;
-      offset += 20;
-      const next = new URL(url);
-      next.searchParams.set('attributes', '_id,created_at,mark_datetime,timezone,origin,address,nsr,cpf');
-      next.searchParams.set('order', 'mark_datetime,DESC');
-      next.searchParams.set('quantityMarks', '20');
-      next.searchParams.set('lastMarkRowSearched', String(offset));
-      const response = await originalFetch(next.href, { method: 'GET', headers, credentials, cache: 'no-store' });
-      if (!response.ok) throw new Error(`O Acuttis respondeu HTTP ${response.status}. Faça login novamente e tente de novo.`);
-      rows = rowsFrom(await response.json());
-    }
-    return all.map(row => ({ _id: row._id, mark_datetime: row.mark_datetime, timezone: row.timezone, origin: row.origin }));
+  function collect(rows) {
+    const seen = new Set();
+    return rows
+      .filter(row => {
+        if (!row?._id || seen.has(row._id)) return false;
+        seen.add(row._id);
+        return true;
+      })
+      .map(row => ({ _id: row._id, mark_datetime: row.mark_datetime, timezone: row.timezone, origin: row.origin }));
   }
   async function handleResponse(url, headers, credentials, response) {
     if (!activeRequest || handling || !url.startsWith(API)) return;
@@ -42,7 +29,8 @@
     try {
       if (!response.ok) throw new Error(`O Acuttis respondeu HTTP ${response.status}.`);
       const firstRows = rowsFrom(await response.clone().json());
-      const marks = await collect(url, headers, credentials, firstRows);
+      // O Acuttis disponibiliza somente as 20 marcações mais recentes; não tente paginar.
+      const marks = collect(firstRows);
       window.postMessage({ channel: CHANNEL, type: 'result', requestId, marks }, location.origin);
     } catch (error) {
       window.postMessage({ channel: CHANNEL, type: 'result', requestId, error: error.message, marks: [] }, location.origin);
