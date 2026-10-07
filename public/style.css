@@ -86,6 +86,36 @@ h1 {
 .negative {
   color: #c25038;
 }
+.lunch-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex: 0 1 auto;
+  max-width: 390px;
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid #b83232;
+  border-radius: 0.75rem;
+  background: #fff0f0;
+  color: #8e2020;
+  font-weight: 650;
+  animation: lunch-notice-pulse 1.8s ease-in-out infinite;
+}
+.lunch-notice-icon {
+  flex: 0 0 1.375rem;
+}
+@keyframes lunch-notice-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(184 50 50 / 0%); }
+  50% { box-shadow: 0 0 0 5px rgb(184 50 50 / 15%); }
+}
+:root[data-theme="dark"] .lunch-notice {
+  border-color: #f06c6c;
+  background: #3a2024;
+  color: #ffd1d1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lunch-notice { animation: none; }
+}
 .day-dialog {
   border: 0;
   border-radius: 18px;

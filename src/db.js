@@ -77,6 +77,7 @@ db.exec(`
     date TEXT NOT NULL,
     target_minutes INTEGER NOT NULL,
     note TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'adjustment' CHECK(kind IN ('adjustment','compensatory-off')),
     PRIMARY KEY(user_id, date)
   );
   CREATE TABLE IF NOT EXISTS user_settings (
@@ -97,11 +98,16 @@ db.exec(`
   );
 `);
 
+if (!columns('day_settings').includes('kind'))
+  db.exec("ALTER TABLE day_settings ADD COLUMN kind TEXT NOT NULL DEFAULT 'adjustment'");
+
 db.prepare("INSERT OR IGNORE INTO work_schedules(id,name,is_builtin) VALUES('equipe-dev','Equipe Dev',1)").run();
 const devDay = db.prepare("INSERT OR IGNORE INTO work_schedule_days(schedule_id,weekday,start_minute,end_minute,break_minutes) VALUES('equipe-dev',?,?,?,60)");
 for (const day of [1, 2, 3, 4]) devDay.run(day, 480, 1080);
 devDay.run(5, 480, 1020);
 db.exec("INSERT OR IGNORE INTO user_work_schedules(user_id,schedule_id) SELECT id,'equipe-dev' FROM users");
+// Acuttis login now happens in each user's Chrome profile; discard obsolete server-side credentials.
+db.prepare("DELETE FROM user_settings WHERE key = 'acuttis_credentials_v1'").run();
 
 export function setting(userId, key, fallback) {
   return db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(userId, key)?.value ?? fallback;
@@ -111,10 +117,15 @@ export function saveSetting(userId, key, value) {
   db.prepare('INSERT INTO user_settings(user_id,key,value) VALUES(?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value').run(userId, key, String(value));
 }
 
+export function deleteCompensatoryDayOff(userId, date) {
+  return db.prepare("DELETE FROM day_settings WHERE user_id = ? AND date = ? AND kind = 'compensatory-off'").run(userId, date).changes > 0;
+}
+
 export function claimLegacyData(userId) {
   if (tableExists('legacy_marks')) db.prepare('INSERT OR IGNORE INTO marks(user_id,id,mark_datetime,timezone,origin) SELECT ?,id,mark_datetime,timezone,origin FROM legacy_marks').run(userId);
   if (tableExists('legacy_day_settings')) db.prepare('INSERT OR IGNORE INTO day_settings(user_id,date,target_minutes,note) SELECT ?,date,target_minutes,note FROM legacy_day_settings').run(userId);
   if (tableExists('legacy_settings')) db.prepare('INSERT OR IGNORE INTO user_settings(user_id,key,value) SELECT ?,key,value FROM legacy_settings').run(userId);
+  db.prepare("DELETE FROM user_settings WHERE user_id = ? AND key = 'acuttis_credentials_v1'").run(userId);
   if (tableExists('legacy_settings') && db.prepare("SELECT value FROM legacy_settings WHERE key='onboarding_complete'").get()?.value === '1')
     db.prepare("INSERT OR IGNORE INTO user_onboarding(user_id,complete,completed_at) VALUES(?,1,CURRENT_TIMESTAMP)").run(userId);
   if (tableExists('legacy_shift_provisions')) db.prepare('INSERT OR IGNORE INTO shift_provisions(user_id,duty_date,day_off_date,duty_target_minutes,created_at) SELECT ?,duty_date,day_off_date,duty_target_minutes,created_at FROM legacy_shift_provisions').run(userId);

@@ -54,6 +54,21 @@ $("#month").value = today.slice(0, 7);
 
 const appearanceKey = "controle-ponto.appearance";
 const defaultAppearance = { theme: "system", primary: "#2267a5" };
+const lunchNoticeKey = () => `controle-ponto.lunch-notice.${encodeURIComponent(authUsername.toLowerCase())}`;
+const defaultLunchNotice = "Almoço! Término em {tempo} (às {horario})";
+function readLunchNotice() {
+  try { return localStorage.getItem(lunchNoticeKey())?.trim() || defaultLunchNotice; }
+  catch { return defaultLunchNotice; }
+}
+let lunchNoticeTemplate = readLunchNotice();
+function saveLunchNotice(value) {
+  const trimmed = value.trim().slice(0, 140);
+  lunchNoticeTemplate = trimmed || defaultLunchNotice;
+  try {
+    if (trimmed) localStorage.setItem(lunchNoticeKey(), trimmed);
+    else localStorage.removeItem(lunchNoticeKey());
+  } catch {}
+}
 function readAppearance() {
   try {
     const saved = JSON.parse(localStorage.getItem(appearanceKey) || "{}");
@@ -199,8 +214,36 @@ function todayProjection(item) {
   const detail = `Jornada: ${fmt(item.target)} · trabalhadas: ${fmt(item.worked)}.`;
   return `<div class="col-12 col-lg-4"><div class="card border-0 shadow-sm h-100"><div class="card-body p-4">${header}<div class="projection-value mt-2">${output}</div><div class="small text-secondary">${status} · ${detail}</div><div class="small primary-note mt-2">${overtime}</div></div></div></div>`;
 }
+function renderLunchNotice(lunch) {
+  const lunchNotice = $("#lunch-notice");
+  const isLunch = lunch?.marks.length === 2;
+  lunchNotice.classList.toggle("d-none", !isLunch);
+  if (isLunch) {
+    const [hour, minute] = lunch.marks[1].split(":").map(Number);
+    const finishAt = hour * 60 + minute + (lunch.breakMinutes ?? 60);
+    const currentParts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "America/Sao_Paulo",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date());
+    const currentMinutes = Number(currentParts.find(part => part.type === "hour").value) * 60
+      + Number(currentParts.find(part => part.type === "minute").value);
+    const remaining = Math.max(0, finishAt - currentMinutes);
+    const remainingHours = Math.floor(remaining / 60);
+    const remainingMinutes = remaining % 60;
+    const countdown = remainingHours
+      ? `${remainingHours}h${remainingMinutes ? ` ${remainingMinutes}min` : ""}`
+      : `${remainingMinutes} min`;
+    const finishClock = `${String(Math.floor((finishAt % 1440) / 60)).padStart(2, "0")}:${String(finishAt % 60).padStart(2, "0")}`;
+    $("#lunch-notice-text").textContent = lunchNoticeTemplate
+      .replaceAll("{tempo}", countdown)
+      .replaceAll("{horario}", finishClock);
+  }
+}
 function render(data) {
   state = data;
+  renderLunchNotice(data.lunch);
   const s = data.summary;
   $("#summary").innerHTML =
     metric(
@@ -258,19 +301,21 @@ function render(data) {
       const badge =
         day.shiftKind === "duty"
           ? '<span class="badge  badge-soft mx-3">Plantão</span>'
-          : partial
-            ? '<span class="badge badge-soft-dark mx-3">Em aberto</span>'
-            : "";
+          : day.isCompensatoryOff
+            ? '<span class="badge badge-soft mx-3">Folga compensatória</span>'
+            : day.isHoliday
+              ? '<span class="badge badge-soft mx-3">Feriado</span>'
+              : partial
+                ? '<span class="badge badge-soft-dark mx-3">Em aberto</span>'
+                : "";
       return `<tr data-date="${day.date}" class="${day.date === data.today ? "today" : ""}"><td><strong>${dateLabel(day.date)}</strong> <span class="text-secondary">${dow}</span>${badge}</td><td>${fmt(day.target)}</td><td>${day.marks.length ? day.marks.map((time) => `<span class="punch">${time}</span>`).join("") : '<span class="text-secondary">—</span>'}</td><td>${isFuture ? "—" : fmt(day.worked)}</td><td class="${!isFuture && !partial ? balanceClass(day.balance) : ""}">${isFuture || partial || day.marks.length === 0 ? "—" : fmt(day.balance)}</td><td class="text-secondary">${escapeHtml(day.note)}</td></tr>`;
     })
     .join("");
   $("#sync-status").textContent = data.sync.lastError
     ? `Acuttis: ${data.sync.lastError}`
-    : data.sync.connecting
-      ? "Aguardando login no Chrome para sincronizar…"
-      : data.sync.lastSync
-        ? `Última sincronização: ${new Date(data.sync.lastSync).toLocaleString("pt-BR")} · automática a cada 5 min`
-        : "Ainda não sincronizado com o Acuttis";
+    : data.sync.lastSync
+      ? `Última sincronização manual: ${new Date(data.sync.lastSync).toLocaleString("pt-BR")}`
+      : "Ainda não sincronizado com o Acuttis. Use o botão Sincronizar.";
   if (!$("#settings-dialog").open) $("#tolerance").value = data.settings.tolerance;
 }
 async function refresh() {
@@ -301,7 +346,6 @@ $("#open-settings").addEventListener("click", () => {
   if (state?.settings) $("#tolerance").value = state.settings.tolerance;
   $("#settings-dialog").showModal();
   refreshSchedules("settings", state?.settings?.scheduleId).catch(error => message(error.message, "danger"));
-  loadAcuttisCredentials();
 });
 $("#settings-close").addEventListener("click", () => $("#settings-dialog").close());
 $("#settings-cancel").addEventListener("click", () => $("#settings-dialog").close());
@@ -314,11 +358,9 @@ $("#settings-dialog").addEventListener("close", () => {
   }
   initScheduleBuilder("settings");
   $("#settings-schedule-builder").hidden = true;
-  $("#acuttis-username").value = "";
-  $("#acuttis-password").value = "";
 });
 function selectSettingsTab(tab) {
-  for (const name of ["work", "appearance", "acuttis", "account"]) {
+  for (const name of ["work", "appearance", "notices", "acuttis", "account"]) {
     const selected = name === tab;
     $(`#tab-${name}`).classList.toggle("active", selected);
     $(`#tab-${name}`).setAttribute("aria-selected", String(selected));
@@ -330,10 +372,11 @@ $("#tab-work").addEventListener("click", () => selectSettingsTab("work"));
 $("#tab-appearance").addEventListener("click", () =>
   selectSettingsTab("appearance"),
 );
+$("#tab-notices").addEventListener("click", () => selectSettingsTab("notices"));
 $("#tab-acuttis").addEventListener("click", () => selectSettingsTab("acuttis"));
 $("#tab-account").addEventListener("click", () => selectSettingsTab("account"));
 $(".settings-tabs").addEventListener("keydown", (event) => {
-  const tabs = [$("#tab-work"), $("#tab-appearance"), $("#tab-acuttis"), $("#tab-account")];
+  const tabs = [$("#tab-work"), $("#tab-appearance"), $("#tab-notices"), $("#tab-acuttis"), $("#tab-account")];
   const current = tabs.indexOf(document.activeElement);
   if (current < 0) return;
   const next =
@@ -354,6 +397,14 @@ $(".settings-tabs").addEventListener("keydown", (event) => {
 $("#theme-choice").addEventListener("change", (event) =>
   saveAppearance({ theme: event.target.value }),
 );
+$("#lunch-notice-template").value = lunchNoticeTemplate;
+$("#lunch-notice-template").addEventListener("input", event => {
+  saveLunchNotice(event.target.value);
+  renderLunchNotice(state?.lunch);
+});
+$("#lunch-notice-template").addEventListener("blur", event => {
+  if (!event.target.value.trim()) event.target.value = defaultLunchNotice;
+});
 $("#primary-color").addEventListener("input", (event) =>
   saveAppearance({ primary: event.target.value }),
 );
@@ -363,57 +414,13 @@ $("#welcome-theme").addEventListener("change", (event) =>
 $("#welcome-primary-color").addEventListener("input", (event) =>
   saveAppearance({ primary: event.target.value }),
 );
-async function loadAcuttisCredentials() {
-  try {
-    const value = await api("/api/acuttis/credentials");
-    $("#acuttis-username").value = value.username;
-    $("#acuttis-password").value = "";
-    $("#credentials-status").textContent = value.configured
-      ? `Acesso salvo para ${value.username}. A senha permanece protegida no servidor.`
-      : "Nenhum acesso salvo. Informe suas credenciais para habilitar o login automático.";
-    $("#delete-acuttis-credentials").hidden = !value.configured;
-  } catch (error) {
-    $("#credentials-status").textContent = error.message;
-  }
+const ACUTTIS_SIGNIN = "https://app.acuttis.com.br/signin";
+function openAcuttisTab() {
+  const tab = window.open(ACUTTIS_SIGNIN, "_blank");
+  if (!tab) throw new Error("O navegador bloqueou a nova aba. Permita pop-ups para este endereço e tente novamente.");
+  try { tab.opener = null; } catch {}
+  return tab;
 }
-$("#save-acuttis-credentials").addEventListener("click", (event) =>
-  action(event.currentTarget, async () => {
-    const result = await api("/api/acuttis/credentials", {
-      method: "PUT",
-      body: JSON.stringify({ username: $("#acuttis-username").value, password: $("#acuttis-password").value }),
-    });
-    $("#acuttis-password").value = "";
-    $("#credentials-status").textContent = `Acesso salvo para ${result.username}. A senha permanece protegida no servidor.`;
-    $("#delete-acuttis-credentials").hidden = false;
-    message("Credenciais do Acuttis salvas com criptografia.", "success");
-  }),
-);
-$("#acuttis-username").addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    $("#acuttis-password").focus();
-  }
-});
-$("#acuttis-password").addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    $("#save-acuttis-credentials").click();
-  }
-});
-$("#delete-acuttis-credentials").addEventListener("click", (event) =>
-  action(event.currentTarget, async () => {
-    if (!confirm("Remover as credenciais do Acuttis salvas neste aplicativo?")) return;
-    await api("/api/acuttis/credentials", { method: "DELETE" });
-    $("#acuttis-username").value = "";
-    $("#acuttis-password").value = "";
-    $("#credentials-status").textContent = "Nenhum acesso salvo. Informe suas credenciais para habilitar o login automático.";
-    $("#delete-acuttis-credentials").hidden = true;
-    message("Credenciais do Acuttis removidas.", "success");
-  }),
-);
-$("#open-acuttis").addEventListener("click", () =>
-  $("#acuttis-dialog").showModal(),
-);
 document
   .querySelectorAll("[data-close-dialog]")
   .forEach((button) =>
@@ -421,23 +428,43 @@ document
       document.getElementById(button.dataset.closeDialog).close(),
     ),
   );
-$("#start-connection").addEventListener("click", (event) =>
-  action(event.currentTarget, async () => {
-    await api("/api/acuttis/open", { method: "POST" });
-    $("#connection-status").textContent =
-      "Se houver credenciais salvas, o login será preenchido automaticamente. Conclua eventual MFA ou CAPTCHA na janela aberta; depois a sincronização começa.";
-    await refresh();
-  }),
-);
+$("#open-acuttis").addEventListener("click", () => {
+  try { openAcuttisTab(); }
+  catch (error) { message(error.message, "danger"); }
+});
+$("#welcome-open-acuttis").addEventListener("click", () => {
+  try { openAcuttisTab(); $("#welcome-acuttis-status").textContent = "Acuttis aberto. Depois de entrar, volte para continuar."; }
+  catch (error) { $("#welcome-acuttis-status").textContent = error.message; }
+});
+function requestExtensionSync() {
+  const requestId = crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    let ackTimer, resultTimer;
+    const cleanup = () => { clearTimeout(ackTimer); clearTimeout(resultTimer); window.removeEventListener("message", onMessage); };
+    const onMessage = event => {
+      if (event.source !== window || event.origin !== location.origin || event.data?.channel !== "meu-ponto-extension-v1" || event.data.requestId !== requestId) return;
+      if (event.data.type === "ack") {
+        if (event.data.error || event.data.ok === false) { cleanup(); reject(new Error(event.data.error || "A extensão não conseguiu iniciar a sincronização.")); return; }
+        if (event.data.status === "opened-acuttis") { cleanup(); resolve({ openedAcuttis: true }); return; }
+        clearTimeout(ackTimer);
+        resultTimer = setTimeout(() => { cleanup(); reject(new Error("A extensão iniciou, mas não retornou resposta do Acuttis. Recarregue a extensão em chrome://extensions, recarregue a aba do Acuttis e tente novamente.")); }, 40000);
+      }
+      if (event.data.type === "result") { cleanup(); resolve({ marks: event.data.marks, error: event.data.error }); }
+    };
+    window.addEventListener("message", onMessage);
+    ackTimer = setTimeout(() => { cleanup(); reject(new Error("Extensão do Chrome não detectada. Instale-a e configure o endereço deste painel nas opções da extensão.")); }, 1800);
+    window.postMessage({ channel: "meu-ponto-extension-v1", type: "sync", requestId }, location.origin);
+  });
+}
 $("#sync").addEventListener("click", (event) =>
   action(event.currentTarget, async () => {
-    const result = await api("/api/acuttis/sync", { method: "POST" });
-    message(
-      result.pending
-        ? "Aguardando login no Chrome. A sincronização continuará automaticamente."
-        : `${result.added} marcação(ões) nova(s) em ${result.pages} página(s).`,
-      result.pending ? "info" : "success",
-    );
+    const captured = await requestExtensionSync();
+    if (captured.openedAcuttis) { message("Abri o Acuttis em uma nova aba. Faça login e clique em Sincronizar novamente.", "info"); return; }
+    if (captured.error) throw new Error(captured.error);
+    if (!Array.isArray(captured.marks)) throw new Error("A extensão retornou uma resposta inválida.");
+    const result = await api("/api/import", { method: "POST", body: JSON.stringify({ source: "acuttis-extension", marks: captured.marks }) });
+    if (!Number.isInteger(result.added) || !Number.isInteger(result.received) || !result.syncedAt) throw new Error("O servidor não confirmou a importação dos batimentos.");
+    message(`${result.added} marcação(ões) nova(s) importada(s) de ${result.received} recebida(s).`, "success");
     await refresh();
   }),
 );
@@ -519,9 +546,10 @@ $("#days").addEventListener("click", (event) => {
   $("#day-target").value =
     `${String(Math.floor(day.target / 60)).padStart(2, "0")}:${String(day.target % 60).padStart(2, "0")}`;
   $("#day-note").value = day.note;
-  $("#day-target").disabled = !!day.shiftKind;
-  $("#day-note").disabled = !!day.shiftKind;
-  $("#save-day").disabled = !!day.shiftKind;
+  $("#day-target").disabled = !!day.shiftKind || day.isHoliday;
+  $("#day-note").disabled = !!day.shiftKind || day.isHoliday;
+  $("#save-day").disabled = !!day.shiftKind || day.isHoliday;
+  $("#delete-day-off").classList.toggle("d-none", !day.isCompensatoryOff);
   $("#new-mark").value = "";
   $("#mark-list").innerHTML = day.marks
     .map(
@@ -544,6 +572,28 @@ $("#save-day").addEventListener("click", (event) =>
     });
     $("#day-dialog").close();
     message("Jornada do dia salva.", "success");
+    await refresh();
+  }),
+);
+$("#delete-day-off").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    await api(`/api/day-off/${encodeURIComponent(selectedDate)}`, { method: "DELETE" });
+    $("#day-dialog").close();
+    message("Registro de folga removido.", "success");
+    await refresh();
+  }),
+);
+$("#new-day-off").addEventListener("click", () => {
+  $("#compensatory-date").value = today;
+  $("#day-off-dialog").showModal();
+});
+$("#save-day-off").addEventListener("click", (event) =>
+  action(event.currentTarget, async () => {
+    const date = $("#compensatory-date").value;
+    if (!date) throw new Error("Informe a data da folga.");
+    await api("/api/day-off", { method: "POST", body: JSON.stringify({ date }) });
+    $("#day-off-dialog").close();
+    message("Folga compensatória registrada. A data não contará como saldo devedor.", "success");
     await refresh();
   }),
 );
@@ -585,8 +635,6 @@ $("#settings").addEventListener("submit", (event) => {
   });
 });
 let onboardingStep = 1;
-let onboardingConfiguredCredentials = false;
-let onboardingWarning = "";
 
 function showWelcome() {
   $("#startup-screen").hidden = true;
@@ -621,7 +669,7 @@ function setWelcomeStep(step) {
   $("#welcome-next").hidden = step === 3;
   $("#welcome-finish").hidden = step !== 3;
   $("#welcome-next").textContent = step === 1
-    ? "Salvar acesso e continuar"
+    ? "Continuar"
     : "Salvar jornada e continuar";
   $("#welcome-error").hidden = true;
 }
@@ -639,6 +687,8 @@ async function initializeApp() {
       return;
     }
     authUsername = auth.user.username;
+    lunchNoticeTemplate = readLunchNotice();
+    $("#lunch-notice-template").value = lunchNoticeTemplate;
     const [data, onboarding] = await Promise.all([
       api(`/api/dashboard?month=${encodeURIComponent(today.slice(0, 7))}`),
       api("/api/onboarding"),
@@ -648,11 +698,7 @@ async function initializeApp() {
       showDashboard();
       return;
     }
-    const credentials = await api("/api/acuttis/credentials");
     await refreshSchedules('welcome', data.settings.scheduleId);
-    onboardingConfiguredCredentials = credentials.configured;
-    $("#welcome-acuttis-username").value = credentials.username;
-    $("#welcome-acuttis-password").value = "";
     $("#welcome-tolerance").value = data.settings.tolerance;
     setWelcomeStep(1);
     showWelcome();
@@ -714,23 +760,7 @@ $("#welcome-next").addEventListener("click", async (event) => {
   button.disabled = true;
   $("#welcome-error").hidden = true;
   try {
-    if (onboardingStep === 1) {
-      const username = $("#welcome-acuttis-username").value.trim();
-      const password = $("#welcome-acuttis-password").value;
-      if (!username) throw new Error("Informe seu usuário do Acuttis.");
-      if (!password && !onboardingConfiguredCredentials) throw new Error("Informe sua senha do Acuttis.");
-      await api("/api/acuttis/credentials", {
-        method: "PUT",
-        body: JSON.stringify({ username, password }),
-      });
-      onboardingConfiguredCredentials = true;
-      $("#welcome-acuttis-password").value = "";
-      try {
-        await api("/api/acuttis/open", { method: "POST" });
-      } catch (error) {
-        onboardingWarning = `As credenciais foram salvas, mas não foi possível abrir o Chromium: ${error.message}`;
-      }
-    } else if (onboardingStep === 2) {
+    if (onboardingStep === 2) {
       const toleranceMinutes = Number($("#welcome-tolerance").value);
       if (!$("#welcome-schedule").value || !Number.isInteger(toleranceMinutes)) throw new Error("Selecione uma jornada e informe a tolerância.");
       await api('/api/work-schedules/assign', { method: 'PUT', body: JSON.stringify({ scheduleId: $('#welcome-schedule').value }) });
@@ -751,8 +781,7 @@ $("#welcome-finish").addEventListener("click", async (event) => {
     await api("/api/onboarding/complete", { method: "POST" });
     showDashboard();
     await refresh();
-    if (onboardingWarning) message(onboardingWarning, "info");
-    else message("Configuração concluída. Seu painel está pronto.", "success");
+    message("Configuração concluída. Seu painel está pronto.", "success");
   } catch (error) {
     welcomeError(error.message);
   } finally {
