@@ -29,7 +29,7 @@ O ícone de configurações abre as preferências de jornada e a aba **Aparênci
 
 1. Carregue a pasta `extension/` no Chrome em `chrome://extensions` com o **Modo do desenvolvedor → Carregar sem compactação**.
 2. Nas opções da extensão, informe a origem usada para abrir o Meu Ponto e conceda acesso a esse endereço. Depois recarregue as abas do painel e do Acuttis.
-3. Abra o Acuttis no mesmo perfil do Chrome e faça login. No Meu Ponto, clique em **Sincronizar batimentos**. A extensão busca as páginas do mês atual e importa os registros para a conta conectada.
+3. Abra o Acuttis no mesmo perfil do Chrome e faça login. No Meu Ponto, clique em **Sincronizar batimentos**. A extensão importa até as 20 marcações mais recentes exibidas pelo Acuttis para a conta conectada.
 
 A sincronização é manual. A extensão só captura batimentos quando o usuário clica no botão do painel; não armazena senha, não executa sincronizações em segundo plano e não abre navegador no servidor. O processamento ocorre no perfil do Chrome do usuário e envia ao servidor somente `_id`, horário, fuso e origem das marcações. A extensão usa permissões de host do Acuttis e pede acesso apenas à origem do painel configurada pelo usuário.
 
