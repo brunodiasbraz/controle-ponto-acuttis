@@ -23,6 +23,10 @@
               <label for="auth-username" class="form-label">Nome de usuário</label>
               <input id="auth-username" name="username" class="form-control" type="text" autocomplete="username" minlength="3" maxlength="32" required />
             </div>
+            <div id="auth-email-group" class="mb-3" hidden>
+              <label for="auth-email" class="form-label">Email para recuperação</label>
+              <input id="auth-email" class="form-control" type="email" autocomplete="email" maxlength="254" />
+            </div>
             <div class="mb-3">
               <label for="auth-password" class="form-label">Senha</label>
               <input id="auth-password" name="password" class="form-control" type="password" autocomplete="current-password" minlength="12" maxlength="256" required />
@@ -32,6 +36,17 @@
             <button id="auth-submit" type="submit" class="btn btn-primary w-100">Entrar</button>
           </form>
           <p class="small text-secondary text-center mt-3 mb-0"><span id="auth-toggle-prompt">Ainda não tem conta?</span> <button id="auth-toggle" type="button" class="btn btn-link btn-sm p-0 align-baseline">Criar conta</button></p>
+          <button id="forgot-password" type="button" class="btn btn-link btn-sm d-block mx-auto mt-2">Esqueci minha senha</button>
+          <form id="recovery-form" class="mt-3" hidden>
+            <h2 class="h6">Recuperar senha</h2>
+            <p class="small text-secondary">Informe seu email para receber um código válido por 15 minutos.</p>
+            <label for="recovery-email" class="form-label">Email</label><input id="recovery-email" class="form-control mb-2" type="email" autocomplete="email" required />
+            <div id="recovery-code-group" hidden><label for="recovery-code" class="form-label">Código recebido</label><input id="recovery-code" class="form-control mb-2" inputmode="numeric" maxlength="6" autocomplete="one-time-code" /><label for="recovery-password" class="form-label">Nova senha</label><input id="recovery-password" class="form-control mb-2" type="password" minlength="12" maxlength="256" autocomplete="new-password" /></div>
+            <div id="recovery-error" class="small text-danger mb-2" hidden></div>
+            <button id="recovery-submit" class="btn btn-primary w-100" type="submit">Enviar código</button>
+            <button id="recovery-resend" class="btn btn-link btn-sm w-100" type="button" hidden>Reenviar código</button>
+            <button id="recovery-cancel" class="btn btn-link btn-sm w-100" type="button">Voltar ao login</button>
+          </form>
         </div>
       </div>
     </section>
@@ -369,6 +384,12 @@
             <div class="metric-label">Usuário conectado</div>
             <div id="account-username" class="fw-semibold mt-1"></div>
           </div>
+          <div id="account-email-alert" class="alert alert-info mt-3" role="status" hidden>Você ainda não tem um email cadastrado. Adicione um email válido para recuperar sua senha caso necessário.</div>
+          <div class="mt-3">
+            <label for="account-email" class="form-label">Email da conta</label>
+            <div class="input-group"><input id="account-email" class="form-control" type="email" autocomplete="email" maxlength="254" required><button id="account-email-save" class="btn btn-outline-primary" type="button">Salvar email</button></div>
+            <div id="account-email-status" class="form-text" aria-live="polite"></div>
+          </div>
           <div class="border-top mt-4 pt-3">
             <p class="small text-secondary">Encerre sua sessão neste dispositivo.</p>
             <button id="logout" class="btn btn-outline-danger d-inline-flex align-items-center gap-2" type="button">
@@ -472,6 +493,18 @@
           <button id="save-day-off" type="button" class="btn btn-primary">Registrar folga</button>
           <button class="btn btn-outline-secondary" type="button" data-close-dialog="day-off-dialog">Cancelar</button>
         </div>
+      </form>
+    </dialog>
+    <dialog id="lunch-dialog" class="day-dialog">
+      <form method="dialog" class="p-4 text-center">
+        <div class="d-flex justify-content-end"><button class="btn-close" type="button" data-close-dialog="lunch-dialog" aria-label="Fechar"></button></div>
+        <div class="eyebrow">INTERVALO DE ALMOÇO</div>
+        <div class="d-flex justify-content-center align-items-center gap-4 my-3">
+          <div><div class="small text-secondary">Tempo restante</div><div id="lunch-live-clock" class="display-5 fw-semibold">--:--:--</div></div>
+          <div class="border-start ps-4"><div class="small text-secondary">Término previsto</div><div id="lunch-finish-time" class="display-5 fw-semibold">--:--</div></div>
+        </div>
+        <p id="lunch-live-message" class="mt-3 mb-0"></p>
+        <button class="btn btn-primary mt-4" type="button" data-close-dialog="lunch-dialog">Fechar</button>
       </form>
     </dialog>
     <script src="/app.js" type="module"></script>

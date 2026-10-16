@@ -123,6 +123,9 @@ h1 {
   width: min(95vw, 880px);
   padding: 0;
 }
+#lunch-dialog {
+  border: 1px solid var(--primary-color);
+}
 .day-dialog::backdrop {
   background: #152a3c88;
 }

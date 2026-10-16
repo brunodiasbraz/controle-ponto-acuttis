@@ -217,7 +217,7 @@ function todayProjection(item) {
 function renderLunchNotice(lunch) {
   const lunchNotice = $("#lunch-notice");
   const isLunch = lunch?.marks.length === 2;
-  lunchNotice.classList.toggle("d-none", !isLunch);
+  lunchNotice.classList.add("d-none");
   if (isLunch) {
     const [hour, minute] = lunch.marks[1].split(":").map(Number);
     const finishAt = hour * 60 + minute + (lunch.breakMinutes ?? 60);
@@ -225,22 +225,29 @@ function renderLunchNotice(lunch) {
       timeZone: "America/Sao_Paulo",
       hour: "2-digit",
       minute: "2-digit",
+      second: "2-digit",
       hourCycle: "h23",
     }).formatToParts(new Date());
     const currentMinutes = Number(currentParts.find(part => part.type === "hour").value) * 60
       + Number(currentParts.find(part => part.type === "minute").value);
-    const remaining = Math.max(0, finishAt - currentMinutes);
-    const remainingHours = Math.floor(remaining / 60);
-    const remainingMinutes = remaining % 60;
-    const countdown = remainingHours
-      ? `${remainingHours}h${remainingMinutes ? ` ${remainingMinutes}min` : ""}`
-      : `${remainingMinutes} min`;
+    const currentSeconds = Number(currentParts.find(part => part.type === "second").value);
+    const remainingSeconds = Math.max(0, finishAt * 60 - (currentMinutes * 60 + currentSeconds));
+    const remainingHours = Math.floor(remainingSeconds / 3600);
+    const remainingMinutes = Math.floor((remainingSeconds % 3600) / 60);
+    const remainingRemainder = remainingSeconds % 60;
+    const countdown = `${String(remainingHours).padStart(2, "0")}:${String(remainingMinutes).padStart(2, "0")}:${String(remainingRemainder).padStart(2, "0")}`;
     const finishClock = `${String(Math.floor((finishAt % 1440) / 60)).padStart(2, "0")}:${String(finishAt % 60).padStart(2, "0")}`;
-    $("#lunch-notice-text").textContent = lunchNoticeTemplate
+    $("#lunch-live-clock").textContent = countdown;
+    $("#lunch-finish-time").textContent = finishClock;
+    $("#lunch-live-message").textContent = lunchNoticeTemplate
       .replaceAll("{tempo}", countdown)
       .replaceAll("{horario}", finishClock);
+    if (!$("#lunch-dialog").open && !window.lunchDialogShown) { $("#lunch-dialog").showModal(); window.lunchDialogShown = true; }
+  } else {
+    window.lunchDialogShown = false;
   }
 }
+setInterval(() => { if (state?.lunch?.marks.length === 2) renderLunchNotice(state.lunch); }, 1000);
 function render(data) {
   state = data;
   renderLunchNotice(data.lunch);
@@ -257,25 +264,19 @@ function render(data) {
       `${s.markCount} batimentos importados`,
     ) +
     metric(
-      "Saldo da semana",
-      fmt(s.weekBalance),
-      "Apenas dias fechados",
-      balanceClass(s.weekBalance),
-    ) +
-    metric(
       "Saldo do mês",
       fmt(s.balance),
       s.missingDates.length
         ? `${s.missingDates.length} dia(s) com marcações incompletas`
         : "Apenas dias fechados",
       balanceClass(s.balance),
-    );
+    ) + metric("Banco de horas total", fmt(s.generalBalance + s.balance), "Saldo acumulado total", balanceClass(s.generalBalance + s.balance));
   $("#projections").innerHTML =
     todayProjection(data.projections.today) +
     projection(
       "Saída na sexta-feira",
       data.projections.friday,
-      "Zerar saldo da semana",
+      "Compensar banco do mês",
       true,
     ) +
     projection(
@@ -374,7 +375,24 @@ $("#tab-appearance").addEventListener("click", () =>
 );
 $("#tab-notices").addEventListener("click", () => selectSettingsTab("notices"));
 $("#tab-acuttis").addEventListener("click", () => selectSettingsTab("acuttis"));
-$("#tab-account").addEventListener("click", () => selectSettingsTab("account"));
+async function loadAccountEmail() {
+  const result = await api('/api/account/email');
+  $('#account-email').value = result.email;
+  $('#account-email-alert').hidden = !!result.email;
+  $('#account-email-status').textContent = result.email ? 'Email cadastrado para recuperação de senha.' : '';
+}
+$('#tab-account').addEventListener('click', () => {
+  selectSettingsTab('account');
+  loadAccountEmail().catch(error => message(error.message, 'danger'));
+});
+$('#account-email-save').addEventListener('click', event => action(event.currentTarget, async () => {
+  const email = $('#account-email').value.trim();
+  const result = await api('/api/account/email', { method:'PUT', body:JSON.stringify({email}) });
+  $('#account-email').value = result.email;
+  $('#account-email-alert').hidden = true;
+  $('#account-email-status').textContent = 'Email salvo para recuperação de senha.';
+  message('Email da conta atualizado.', 'success');
+}));
 $(".settings-tabs").addEventListener("keydown", (event) => {
   const tabs = [$("#tab-work"), $("#tab-appearance"), $("#tab-notices"), $("#tab-acuttis"), $("#tab-account")];
   const current = tabs.indexOf(document.activeElement);
@@ -715,6 +733,9 @@ function updateAuthMode() {
   $("#auth-toggle").textContent = registering ? "Entrar" : "Criar conta";
   $("#auth-password").autocomplete = registering ? "new-password" : "current-password";
   $("#auth-password-help").hidden = !registering;
+  $("#auth-email-group").hidden = !registering;
+  $("#auth-email").required = registering;
+  $("#forgot-password").hidden = registering;
   $("#auth-error").hidden = true;
 }
 $("#auth-toggle").addEventListener("click", () => {
@@ -730,7 +751,7 @@ $("#auth-form").addEventListener("submit", async (event) => {
   try {
     await api(`/api/auth/${authMode}`, {
       method: "POST",
-      body: JSON.stringify({ username: $("#auth-username").value.trim(), password: $("#auth-password").value }),
+      body: JSON.stringify({ username: $("#auth-username").value.trim(), email: $("#auth-email").value.trim(), password: $("#auth-password").value }),
     });
     $("#auth-password").value = "";
     $("#auth-screen").hidden = true;
@@ -743,6 +764,26 @@ $("#auth-form").addEventListener("submit", async (event) => {
     button.disabled = false;
   }
 });
+let recoveryRequested = false;
+$("#forgot-password").onclick = () => { $("#auth-form").hidden = true; $("#auth-toggle").parentElement.hidden = true; $("#forgot-password").hidden = true; $("#recovery-form").hidden = false; };
+$("#recovery-cancel").onclick = () => { $("#recovery-form").hidden = true; $("#auth-form").hidden = false; $("#auth-toggle").parentElement.hidden = false; updateAuthMode(); };
+$("#recovery-resend").onclick = async () => {
+  const error = $("#recovery-error"); error.hidden = true;
+  try { await api('/api/auth/forgot', { method:'POST', body:JSON.stringify({email:$("#recovery-email").value.trim()}) }); error.textContent='Se o email estiver cadastrado, enviaremos um novo código válido por 15 minutos.'; error.className='small text-success mb-2'; error.hidden=false; }
+  catch (e) { error.textContent=e.message; error.className='small text-danger mb-2'; error.hidden=false; }
+};
+$("#recovery-form").onsubmit = async event => {
+  event.preventDefault(); const error=$("#recovery-error"), button=$("#recovery-submit"); error.hidden=true; button.disabled=true;
+  try {
+    if (!recoveryRequested) {
+      const result=await api('/api/auth/forgot',{method:'POST',body:JSON.stringify({email:$("#recovery-email").value.trim()})});
+      recoveryRequested=true; $("#recovery-code-group").hidden=false; $("#recovery-code").required=true; $("#recovery-password").required=true; $("#recovery-resend").hidden=false; button.textContent='Redefinir senha'; error.textContent=result.message; error.className='small text-success mb-2'; error.hidden=false;
+    } else {
+      await api('/api/auth/reset',{method:'POST',body:JSON.stringify({email:$("#recovery-email").value.trim(),code:$("#recovery-code").value.trim(),password:$("#recovery-password").value})});
+      recoveryRequested=false; $("#recovery-cancel").click(); message('Senha alterada. Entre com sua nova senha.','success');
+    }
+  } catch(e) { error.textContent=e.message; error.className='small text-danger mb-2'; error.hidden=false; } finally { button.disabled=false; }
+};
 $("#logout").addEventListener("click", async () => {
   try {
     await api("/api/auth/logout", { method: "POST" });

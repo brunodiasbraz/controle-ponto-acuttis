@@ -68,3 +68,17 @@ npm test
 ```
 
 Os testes incluem o exemplo de 01–02/10/2026 da planilha: crédito de 11 minutos em 01/10 e saída prevista às **16:19** em 02/10.
+
+## Recuperação de senha e SMTP
+
+Novas contas informam um email único para recuperação de senha. No login, use **Esqueci minha senha** para solicitar um código de seis dígitos, válido por 15 minutos. Configure o envio no ambiente do servidor (por exemplo, em `.env`):
+
+```env
+SMTP_HOST=smtp.seudominio.com
+SMTP_PORT=587
+SMTP_USER=usuario
+SMTP_PASS=senha
+SMTP_FROM="Meu Ponto <nao-responda@seudominio.com>"
+```
+
+Contas anteriores à atualização não têm email associado; será necessário associar um email ao registro no banco antes de usar a recuperação.

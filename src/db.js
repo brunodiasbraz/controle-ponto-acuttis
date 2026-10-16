@@ -23,6 +23,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    email TEXT COLLATE NOCASE,
     password_hash TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
@@ -32,6 +33,15 @@ db.exec(`
     expires_at INTEGER NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS password_reset_codes (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used INTEGER NOT NULL DEFAULT 0 CHECK(used IN (0,1)),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS password_reset_expiry_idx ON password_reset_codes(expires_at);
   CREATE INDEX IF NOT EXISTS user_sessions_expiry_idx ON user_sessions(expires_at);
   CREATE TABLE IF NOT EXISTS user_onboarding (
     user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -97,6 +107,9 @@ db.exec(`
     UNIQUE(user_id, day_off_date)
   );
 `);
+
+if (!columns('users').includes('email')) db.exec('ALTER TABLE users ADD COLUMN email TEXT COLLATE NOCASE');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx ON users(email) WHERE email IS NOT NULL');
 
 if (!columns('day_settings').includes('kind'))
   db.exec("ALTER TABLE day_settings ADD COLUMN kind TEXT NOT NULL DEFAULT 'adjustment'");

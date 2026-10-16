@@ -129,6 +129,22 @@ export function dashboard(month, today, userId) {
 
   const sum = (list, key) => list.reduce((total, day) => total + day[key], 0);
 
+  const historicalStart = '2000-01-01';
+  const historicRows = db.prepare('SELECT mark_datetime FROM marks WHERE user_id=? AND mark_datetime>=? AND mark_datetime<? ORDER BY mark_datetime').all(userId, `${historicalStart} 00:00:00`, `${start} 00:00:00`);
+  const historicByDate = new Map();
+  for (const mark of historicRows) { const date=mark.mark_datetime.slice(0,10); if(!historicByDate.has(date)) historicByDate.set(date,[]); historicByDate.get(date).push(mark); }
+  const historicOverrides = new Map(db.prepare('SELECT date,target_minutes,kind FROM day_settings WHERE user_id=? AND date<?').all(userId,start).map(row=>[row.date,row]));
+  const historicShifts = new Map();
+  for (const row of db.prepare('SELECT duty_date,day_off_date,duty_target_minutes FROM shift_provisions WHERE user_id=? AND duty_date<? AND day_off_date<?').all(userId,start,start)) {
+    historicShifts.set(row.duty_date,row.duty_target_minutes); historicShifts.set(row.day_off_date,0);
+  }
+  const generalBalance = datesBetween(historicalStart, addDays(start,-1)).reduce((total,date)=> {
+    const override=historicOverrides.get(date); const target=historicShifts.get(date) ?? (holidayName(date)?0:override?.target_minutes ?? targetForDate(date));
+    const stats=dayStats(date,historicByDate.get(date)||[],target,tolerance);
+    if (date>=today || (!stats.complete && target>0)) return total;
+    return total+stats.balance;
+  },0);
+
   const gap = days
     .filter((day) => day.date < today && day.target > 0 && !day.complete)
     .map((day) => day.date);
@@ -232,6 +248,7 @@ export function dashboard(month, today, userId) {
       (day) =>
         day.marks.length > 0 ||
         (day.date === today && day.target > 0) ||
+        day.isHoliday ||
         (day.shiftKind === "duty" && day.date >= today) ||
         day.isCompensatoryOff,
     ),
@@ -245,6 +262,7 @@ export function dashboard(month, today, userId) {
       worked: sum(monthToDate, "worked"),
       expected: sum(monthClosed, "target"),
       balance: sum(monthClosed, "balance"),
+      generalBalance,
       weekWorked: sum(weekToDate, "worked"),
       weekExpected: sum(weekClosed, "target"),
       weekBalance: sum(weekClosed, "balance"),
@@ -254,7 +272,7 @@ export function dashboard(month, today, userId) {
     },
     projections: {
       today: todayExitProjection(),
-      friday: projection(thisFriday, weekStart(today)),
+      friday: projection(thisFriday, start),
       monthEnd: projection(monthClose, start, true),
     },
   };

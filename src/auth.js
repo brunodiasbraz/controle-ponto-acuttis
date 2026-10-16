@@ -12,18 +12,21 @@ async function passwordHash(password, salt = randomBytes(16).toString('base64url
   return `scrypt$${salt}$${Buffer.from(derived).toString('base64url')}`;
 }
 
-export async function register(usernameInput, password) {
+export async function register(usernameInput, password, emailInput) {
   const username = typeof usernameInput === 'string' ? usernameInput.trim() : '';
   if (!/^[\p{L}\p{N}_.-]{3,32}$/u.test(username))
     throw Object.assign(new Error('O usuário deve ter de 3 a 32 caracteres: letras, números, ponto, hífen ou sublinhado.'), { status: 400 });
   if (typeof password !== 'string' || Buffer.byteLength(password, 'utf8') < 12 || Buffer.byteLength(password, 'utf8') > 256)
     throw Object.assign(new Error('A senha deve ter entre 12 e 256 bytes.'), { status: 400 });
+  const email = typeof emailInput === 'string' ? emailInput.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 254)
+    throw Object.assign(new Error('Informe um email válido.'), { status: 400 });
   const hash = await passwordHash(password);
   const id = randomUUID();
   db.exec('BEGIN IMMEDIATE');
   try {
     const firstUser = db.prepare('SELECT COUNT(*) AS count FROM users').get().count === 0;
-    db.prepare('INSERT INTO users(id,username,password_hash) VALUES(?,?,?)').run(id, username, hash);
+    db.prepare('INSERT INTO users(id,username,password_hash,email) VALUES(?,?,?,?)').run(id, username, hash, email);
     db.prepare("INSERT INTO user_work_schedules(user_id,schedule_id) VALUES(?,'equipe-dev')").run(id);
     if (firstUser) claimLegacyData(id);
     db.exec('COMMIT');
@@ -31,9 +34,44 @@ export async function register(usernameInput, password) {
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch {}
     if (error.code === 'SQLITE_CONSTRAINT_UNIQUE')
-      throw Object.assign(new Error('Esse nome de usuário já está em uso.'), { status: 409 });
+      throw Object.assign(new Error(error.message.includes('email') ? 'Esse email já está em uso.' : 'Esse nome de usuário já está em uso.'), { status: 409 });
     throw error;
   }
+}
+
+export async function requestPasswordReset(emailInput) {
+  const email = typeof emailInput === 'string' ? emailInput.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 254)
+    throw Object.assign(new Error('Informe um email válido.'), { status: 400 });
+  const user = db.prepare('SELECT id,email FROM users WHERE email = ? COLLATE NOCASE').get(email);
+  if (!user) return;
+  const { randomInt } = await import('node:crypto');
+  const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
+  const id = randomUUID();
+  const hash = createHash('sha256').update(`${id}:${code}`).digest('hex');
+  db.prepare('UPDATE password_reset_codes SET used=1 WHERE user_id=? AND used=0').run(user.id);
+  db.prepare('INSERT INTO password_reset_codes(id,user_id,code_hash,expires_at) VALUES(?,?,?,?)').run(id, user.id, hash, Date.now() + 15 * 60_000);
+  const { sendResetCode } = await import('./mail.js');
+  try { await sendResetCode(email, code); }
+  catch (error) { db.prepare('UPDATE password_reset_codes SET used=1 WHERE id=?').run(id); throw error; }
+}
+
+export async function resetPassword(emailInput, code, password) {
+  const email = typeof emailInput === 'string' ? emailInput.trim().toLowerCase() : '';
+  if (typeof password !== 'string' || Buffer.byteLength(password, 'utf8') < 12 || Buffer.byteLength(password, 'utf8') > 256)
+    throw Object.assign(new Error('A senha deve ter entre 12 e 256 bytes.'), { status: 400 });
+  if (!/^\d{6}$/.test(code || '')) throw Object.assign(new Error('Código inválido ou expirado.'), { status: 400 });
+  const row = db.prepare('SELECT c.id,c.user_id,c.code_hash FROM password_reset_codes c JOIN users u ON u.id=c.user_id WHERE u.email=? COLLATE NOCASE AND c.used=0 AND c.expires_at>? ORDER BY c.created_at DESC LIMIT 1').get(email, Date.now());
+  if (!row || row.code_hash !== createHash('sha256').update(`${row.id}:${code}`).digest('hex'))
+    throw Object.assign(new Error('Código inválido ou expirado.'), { status: 400 });
+  const hash = await passwordHash(password);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hash, row.user_id);
+    db.prepare('UPDATE password_reset_codes SET used=1 WHERE id=?').run(row.id);
+    db.prepare('DELETE FROM user_sessions WHERE user_id=?').run(row.user_id);
+    db.exec('COMMIT');
+  } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
 }
 
 export async function authenticate(usernameInput, password) {
