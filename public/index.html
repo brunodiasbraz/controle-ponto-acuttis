@@ -370,8 +370,8 @@
         <section id="panel-notices" class="settings-panel" role="tabpanel" aria-labelledby="tab-notices" hidden>
           <div class="mb-3 mt-3">
             <label for="lunch-notice-template" class="form-label">Mensagem durante o intervalo</label>
-            <input id="lunch-notice-template" class="form-control" type="text" maxlength="140" autocomplete="off" />
-            <div class="form-text">Use <code>{tempo}</code> para o tempo restante e <code>{horario}</code> para a hora prevista de término. Salvo automaticamente neste navegador.</div>
+            <textarea id="lunch-notice-template" class="form-control font-monospace" rows="7" maxlength="5000" spellcheck="false"></textarea>
+            <div class="form-text">Personalize com HTML. Use <code>{tempo}</code> para o tempo restante e <code>{horario}</code> para a hora prevista. Scripts, formulários e links perigosos são removidos. Salvo automaticamente neste navegador.</div>
           </div>
         </section>
         <section id="panel-acuttis" class="settings-panel" role="tabpanel" aria-labelledby="tab-acuttis" hidden>

@@ -55,7 +55,7 @@ $("#month").value = today.slice(0, 7);
 const appearanceKey = "controle-ponto.appearance";
 const defaultAppearance = { theme: "system", primary: "#2267a5" };
 const lunchNoticeKey = () => `controle-ponto.lunch-notice.${encodeURIComponent(authUsername.toLowerCase())}`;
-const defaultLunchNotice = "Almoço! Término em {tempo} (às {horario})";
+const defaultLunchNotice = "<strong>Almoço!</strong> Término em {tempo} (às {horario})";
 function readLunchNotice() {
   try { return localStorage.getItem(lunchNoticeKey())?.trim() || defaultLunchNotice; }
   catch { return defaultLunchNotice; }
@@ -110,12 +110,46 @@ function playLunchAlarm(finishAt) {
   } catch { stopLunchAlarm(); }
 }
 function saveLunchNotice(value) {
-  const trimmed = value.trim().slice(0, 140);
+  const trimmed = value.trim().slice(0, 5000);
   lunchNoticeTemplate = trimmed || defaultLunchNotice;
   try {
     if (trimmed) localStorage.setItem(lunchNoticeKey(), trimmed);
     else localStorage.removeItem(lunchNoticeKey());
   } catch {}
+}
+function renderLunchNoticeHtml(template, countdown, finishClock) {
+  const source = template
+    .replaceAll("{tempo}", escapeHtml(countdown))
+    .replaceAll("{horario}", escapeHtml(finishClock));
+  const container = document.createElement("div");
+  container.innerHTML = source;
+  const allowedTags = new Set(["A", "B", "BR", "CODE", "DIV", "EM", "H1", "H2", "H3", "I", "IMG", "LI", "OL", "P", "S", "SMALL", "SPAN", "STRONG", "U", "UL"]);
+  const allowedStyles = new Set(["color", "background-color", "font-size", "font-weight", "font-style", "text-align", "text-decoration", "margin", "padding", "border", "border-radius"]);
+  const clean = (parent) => {
+    for (const node of [...parent.childNodes]) {
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      if (!allowedTags.has(node.tagName)) {
+        if (["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "SVG", "MATH", "FORM"].includes(node.tagName)) node.remove();
+        else { node.replaceWith(...node.childNodes); }
+        continue;
+      }
+      for (const attr of [...node.attributes]) {
+        if (attr.name === "style") {
+          const styles = [...node.style].filter(name => allowedStyles.has(name)).map(name => `${name}: ${node.style.getPropertyValue(name)}`).join("; ");
+          if (styles) node.setAttribute("style", styles); else node.removeAttribute("style");
+        } else if (node.tagName === "A" && attr.name === "href") {
+          try { const url = new URL(attr.value, location.href); if (!["http:", "https:", "mailto:"].includes(url.protocol)) node.removeAttribute(attr.name); }
+          catch { node.removeAttribute(attr.name); }
+        } else if (node.tagName === "IMG" && ["src", "alt", "width", "height"].includes(attr.name)) {
+          if (attr.name === "src") { try { if (new URL(attr.value, location.href).protocol !== "https:") node.removeAttribute(attr.name); } catch { node.removeAttribute(attr.name); } }
+        } else if (attr.name !== "title") node.removeAttribute(attr.name);
+      }
+      if (node.tagName === "A") node.setAttribute("rel", "noopener noreferrer");
+      clean(node);
+    }
+  };
+  clean(container);
+  return container;
 }
 function readAppearance() {
   try {
@@ -292,9 +326,8 @@ function renderLunchNotice(lunch) {
     const finishClock = `${String(Math.floor((finishAt % 1440) / 60)).padStart(2, "0")}:${String(finishAt % 60).padStart(2, "0")}`;
     $("#lunch-live-clock").textContent = countdown;
     $("#lunch-finish-time").textContent = finishClock;
-    $("#lunch-live-message").textContent = lunchNoticeTemplate
-      .replaceAll("{tempo}", countdown)
-      .replaceAll("{horario}", finishClock);
+    const message = $("#lunch-live-message");
+    message.replaceChildren(...renderLunchNoticeHtml(lunchNoticeTemplate, countdown, finishClock).childNodes);
     if (!$("#lunch-dialog").open && !window.lunchDialogShown) { $("#lunch-dialog").showModal(); window.lunchDialogShown = true; }
   } else {
     stopLunchAlarm();
