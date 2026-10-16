@@ -68,7 +68,7 @@ const lunchAlarmPreferenceKey = "controle-ponto.lunch-alarm-enabled";
 let lunchAlarmEnabled = localStorage.getItem(lunchAlarmPreferenceKey) !== "false";
 function updateLunchAlarmButton() {
   const button = $("#lunch-alarm-toggle");
-  button.textContent = lunchAlarmEnabled ? "Não tocar alarme" : "Tocar alarme";
+  button.textContent = lunchAlarmEnabled ? "Alarme ativo" : "Alarme desativado";
   button.setAttribute("aria-pressed", String(!lunchAlarmEnabled));
 }
 function stopLunchAlarm() {
