@@ -61,6 +61,54 @@ function readLunchNotice() {
   catch { return defaultLunchNotice; }
 }
 let lunchNoticeTemplate = readLunchNotice();
+let lunchAlarmTimer = null;
+let lunchAlarmContext = null;
+let lunchAlarmFinishedAt = null;
+const lunchAlarmPreferenceKey = "controle-ponto.lunch-alarm-enabled";
+let lunchAlarmEnabled = localStorage.getItem(lunchAlarmPreferenceKey) !== "false";
+function updateLunchAlarmButton() {
+  const button = $("#lunch-alarm-toggle");
+  button.textContent = lunchAlarmEnabled ? "Não tocar alarme" : "Tocar alarme";
+  button.setAttribute("aria-pressed", String(!lunchAlarmEnabled));
+}
+function stopLunchAlarm() {
+  if (lunchAlarmTimer) clearInterval(lunchAlarmTimer);
+  lunchAlarmTimer = null;
+  if (lunchAlarmContext) {
+    lunchAlarmContext.close().catch(() => {});
+    lunchAlarmContext = null;
+  }
+}
+function playLunchAlarm(finishAt) {
+  if (!lunchAlarmEnabled || lunchAlarmFinishedAt === finishAt) return;
+  lunchAlarmFinishedAt = finishAt;
+  stopLunchAlarm();
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+  try {
+    lunchAlarmContext = new AudioContextClass();
+    const context = lunchAlarmContext;
+    const beep = () => {
+      if (context.state !== "running") return;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.16, context.currentTime + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.32);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.33);
+    };
+    context.resume().then(() => {
+      if (lunchAlarmContext !== context) return;
+      beep();
+      lunchAlarmTimer = setInterval(beep, 1600);
+    }).catch(() => {});
+  } catch { stopLunchAlarm(); }
+}
 function saveLunchNotice(value) {
   const trimmed = value.trim().slice(0, 140);
   lunchNoticeTemplate = trimmed || defaultLunchNotice;
@@ -232,6 +280,11 @@ function renderLunchNotice(lunch) {
       + Number(currentParts.find(part => part.type === "minute").value);
     const currentSeconds = Number(currentParts.find(part => part.type === "second").value);
     const remainingSeconds = Math.max(0, finishAt * 60 - (currentMinutes * 60 + currentSeconds));
+    if (remainingSeconds === 0) playLunchAlarm(finishAt);
+    else if (lunchAlarmFinishedAt !== null && lunchAlarmFinishedAt !== finishAt) {
+      stopLunchAlarm();
+      lunchAlarmFinishedAt = null;
+    }
     const remainingHours = Math.floor(remainingSeconds / 3600);
     const remainingMinutes = Math.floor((remainingSeconds % 3600) / 60);
     const remainingRemainder = remainingSeconds % 60;
@@ -244,9 +297,27 @@ function renderLunchNotice(lunch) {
       .replaceAll("{horario}", finishClock);
     if (!$("#lunch-dialog").open && !window.lunchDialogShown) { $("#lunch-dialog").showModal(); window.lunchDialogShown = true; }
   } else {
+    stopLunchAlarm();
+    lunchAlarmFinishedAt = null;
     window.lunchDialogShown = false;
   }
 }
+updateLunchAlarmButton();
+$("#lunch-alarm-toggle").addEventListener("click", () => {
+  lunchAlarmEnabled = !lunchAlarmEnabled;
+  localStorage.setItem(lunchAlarmPreferenceKey, String(lunchAlarmEnabled));
+  updateLunchAlarmButton();
+  if (lunchAlarmEnabled) {
+    lunchAlarmFinishedAt = null;
+    const [hour, minute] = state.lunch.marks[1].split(":").map(Number);
+    const finishAt = hour * 60 + minute + (state.lunch.breakMinutes ?? 60);
+    const now = new Intl.DateTimeFormat("en-GB", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
+    const nowSeconds = (Number(now.find(part => part.type === "hour").value) * 60 + Number(now.find(part => part.type === "minute").value)) * 60 + Number(now.find(part => part.type === "second").value);
+    if (finishAt * 60 <= nowSeconds) playLunchAlarm(finishAt);
+  } else stopLunchAlarm();
+});
+$("#lunch-dialog").addEventListener("close", stopLunchAlarm);
+document.querySelectorAll('[data-close-dialog="lunch-dialog"]').forEach(button => button.addEventListener("click", stopLunchAlarm));
 setInterval(() => { if (state?.lunch?.marks.length === 2) renderLunchNotice(state.lunch); }, 1000);
 function render(data) {
   state = data;
