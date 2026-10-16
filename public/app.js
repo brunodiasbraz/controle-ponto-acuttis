@@ -270,7 +270,7 @@ function render(data) {
         ? `${s.missingDates.length} dia(s) com marcações incompletas`
         : "Apenas dias fechados",
       balanceClass(s.balance),
-    ) + metric("Banco de horas total", fmt(s.generalBalance + s.balance), "Saldo acumulado total", balanceClass(s.generalBalance + s.balance));
+    ) + metric("Banco de horas total", fmt(s.generalBalance + s.balance), "Saldo acumulado a partir de Outubro/2026", balanceClass(s.generalBalance + s.balance));
   $("#projections").innerHTML =
     todayProjection(data.projections.today) +
     projection(
@@ -831,14 +831,6 @@ $("#welcome-finish").addEventListener("click", async (event) => {
 });
 
 initializeApp();
-setInterval(() => {
-  if (
-    !$("#dashboard-app").hidden &&
-    document.visibilityState === "visible" &&
-    $("#month").value === today.slice(0, 7)
-  )
-    refresh();
-}, 5000);
 
 initScheduleBuilder('welcome'); initScheduleBuilder('settings');
 $('#welcome-new-schedule').addEventListener('click',()=>$('#welcome-schedule-builder').hidden=false);
