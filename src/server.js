@@ -4,7 +4,7 @@ import { extname, resolve, sep } from 'node:path';
 import { completeOnboarding, db, deleteCompensatoryDayOff, importMarks, onboardingComplete, saveSetting, setting } from './db.js';
 import { dashboard } from './dashboard.js';
 import { localDate, minutes, shiftTargetForDayOff, weekday } from './calc.js';
-import { authenticate, createSession, deleteSession, getSession, register, requestPasswordReset, resetPassword, sessionMaxAge } from './auth.js';
+import { authenticate, createSession, deleteSession, getSession, register, requestPasswordReset, resetPassword, sessionMaxAge, setUserPassword } from './auth.js';
 import { assignSchedule, createSchedule, getSchedule, scheduleList } from './work-schedules.js';
 import { holidayName } from './holidays.js';
 
@@ -59,7 +59,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method !== 'GET') enforceOrigin(req);
       if (req.method === 'GET' && url.pathname === '/api/auth/status') {
         const user = getSession(requestCookie(req, cookieName));
-        return json(res, 200, { authenticated: !!user, user: user ? { username: user.username } : null });
+        return json(res, 200, { authenticated: !!user, user: user ? { username: user.username, role: user.role } : null });
       }
       if (req.method === 'POST' && ['/api/auth/login', '/api/auth/register'].includes(url.pathname)) {
         const key = rateLimitKey(req);
@@ -74,7 +74,7 @@ const server = http.createServer(async (req, res) => {
           loginAttempts.delete(key);
           const session = createSession(user.id);
           setSessionCookie(res, session.token);
-          return json(res, url.pathname.endsWith('/register') ? 201 : 200, { authenticated: true, user: { username: user.username } });
+          return json(res, url.pathname.endsWith('/register') ? 201 : 200, { authenticated: true, user: { username: user.username, role: user.role } });
         } catch (error) {
           if (![400, 409].includes(error.status)) {
             attempt.count++;
@@ -101,6 +101,35 @@ const server = http.createServer(async (req, res) => {
       const user = getSession(requestCookie(req, cookieName));
       if (!user) return json(res, 401, { error: 'Faça login para continuar.', unauthenticated: true });
       const userId = user.id;
+      if (url.pathname.startsWith('/api/admin/')) {
+        if (user.role !== 'superadmin') return json(res, 403, { error: 'Acesso restrito ao superadministrador.' });
+        if (req.method === 'GET' && url.pathname === '/api/admin/users') {
+          const today = localDate();
+          const month = today.slice(0, 7);
+          const users = db.prepare('SELECT id,username,role FROM users ORDER BY username COLLATE NOCASE').all().map(account => {
+            const data = dashboard(month, today, account.id);
+            return { id: account.id, username: account.username, balance: data.summary.generalBalance + data.summary.balance };
+          });
+          return json(res, 200, { users });
+        }
+        const detailMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
+        if (req.method === 'GET' && detailMatch) {
+          const account = db.prepare('SELECT id,username FROM users WHERE id=?').get(detailMatch[1]);
+          if (!account) return json(res, 404, { error: 'Usuário não encontrado.' });
+          const today = localDate();
+          const requested = url.searchParams.get('month');
+          const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(requested || '') ? requested : today.slice(0, 7);
+          const data = dashboard(month, today, account.id);
+          return json(res, 200, { username: account.username, month, today: data.today, days: data.days, summary: data.summary });
+        }
+        const passwordMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/password$/);
+        if (req.method === 'PUT' && passwordMatch) {
+          const input = await body(req);
+          if (!db.prepare('SELECT id FROM users WHERE id=?').get(passwordMatch[1])) return json(res, 404, { error: 'Usuário não encontrado.' });
+          await setUserPassword(passwordMatch[1], input.password);
+          return json(res, 200, { ok: true });
+        }
+      }
       if (req.method === 'GET' && url.pathname === '/api/account/email') {
         const account = db.prepare('SELECT email FROM users WHERE id=?').get(userId);
         return json(res, 200, { email: account?.email || '' });

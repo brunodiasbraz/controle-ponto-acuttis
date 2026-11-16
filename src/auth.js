@@ -26,7 +26,7 @@ export async function register(usernameInput, password, emailInput) {
   db.exec('BEGIN IMMEDIATE');
   try {
     const firstUser = db.prepare('SELECT COUNT(*) AS count FROM users').get().count === 0;
-    db.prepare('INSERT INTO users(id,username,password_hash,email) VALUES(?,?,?,?)').run(id, username, hash, email);
+    db.prepare('INSERT INTO users(id,username,password_hash,email,role) VALUES(?,?,?,?,?)').run(id, username, hash, email, firstUser ? 'superadmin' : '');
     db.prepare("INSERT INTO user_work_schedules(user_id,schedule_id) VALUES(?,'equipe-dev')").run(id);
     if (firstUser) claimLegacyData(id);
     db.exec('COMMIT');
@@ -77,7 +77,7 @@ export async function resetPassword(emailInput, code, password) {
 export async function authenticate(usernameInput, password) {
   const username = typeof usernameInput === 'string' ? usernameInput.trim() : '';
   if (typeof password !== 'string' || password.length > 256) return null;
-  const user = db.prepare('SELECT id,username,password_hash FROM users WHERE username = ? COLLATE NOCASE').get(username);
+  const user = db.prepare('SELECT id,username,password_hash,role FROM users WHERE username = ? COLLATE NOCASE').get(username);
   if (!user) {
     await passwordHash(password, Buffer.alloc(16).toString('base64url'));
     return null;
@@ -87,7 +87,7 @@ export async function authenticate(usernameInput, password) {
   const candidate = await scrypt(password, Buffer.from(salt, 'base64url'), 64, SCRYPT_OPTIONS);
   const expected = Buffer.from(expectedEncoded, 'base64url');
   if (expected.length !== candidate.length || !timingSafeEqual(expected, candidate)) return null;
-  return { id: user.id, username: user.username };
+  return { id: user.id, username: user.username, role: user.role };
 }
 
 export function createSession(userId) {
@@ -100,8 +100,16 @@ export function createSession(userId) {
 
 export function getSession(token) {
   if (!token || typeof token !== 'string' || token.length > 128) return null;
-  const row = db.prepare('SELECT users.id, users.username FROM user_sessions JOIN users ON users.id=user_sessions.user_id WHERE user_sessions.token_hash = ? AND user_sessions.expires_at > ?').get(hashToken(token), Date.now());
-  return row ? { id: row.id, username: row.username } : null;
+  const row = db.prepare('SELECT users.id, users.username, users.role FROM user_sessions JOIN users ON users.id=user_sessions.user_id WHERE user_sessions.token_hash = ? AND user_sessions.expires_at > ?').get(hashToken(token), Date.now());
+  return row ? { id: row.id, username: row.username, role: row.role } : null;
+}
+
+export async function setUserPassword(userId, password) {
+  if (typeof password !== 'string' || Buffer.byteLength(password, 'utf8') < 12 || Buffer.byteLength(password, 'utf8') > 256)
+    throw Object.assign(new Error('A senha deve ter entre 12 e 256 bytes.'), { status: 400 });
+  const hash = await passwordHash(password);
+  db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(hash, userId);
+  db.prepare('DELETE FROM user_sessions WHERE user_id=?').run(userId);
 }
 
 export function deleteSession(token) {

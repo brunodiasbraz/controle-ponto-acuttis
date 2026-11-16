@@ -2,6 +2,8 @@ const $ = (selector) => document.querySelector(selector);
 let state;
 let selectedDate;
 let authUsername = "";
+let authRole = "";
+let passwordTargetId = "";
 let authMode = "login";
 let scheduleCatalog = [];
 const names = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
@@ -352,6 +354,24 @@ $("#lunch-alarm-toggle").addEventListener("click", () => {
 $("#lunch-dialog").addEventListener("close", stopLunchAlarm);
 document.querySelectorAll('[data-close-dialog="lunch-dialog"]').forEach(button => button.addEventListener("click", stopLunchAlarm));
 setInterval(() => { if (state?.lunch?.marks.length === 2) renderLunchNotice(state.lunch); }, 1000);
+function dayRow(day, today) {
+      const dow = names[new Date(`${day.date}T12:00:00Z`).getUTCDay()];
+      const isFuture = day.date > today;
+      const partial =
+        day.date === today && day.target > 0 && !day.complete;
+      const badge =
+        day.shiftKind === "duty"
+          ? '<span class="badge  badge-soft mx-3">Plantão</span>'
+          : day.isCompensatoryOff
+            ? '<span class="badge badge-soft mx-3">Folga compensatória</span>'
+            : day.isHoliday
+              ? '<span class="badge badge-soft mx-3">Feriado</span>'
+              : partial
+                ? '<span class="badge badge-soft-dark mx-3">Em aberto</span>'
+                : "";
+      return `<tr data-date="${day.date}" class="${day.date === today ? "today" : ""}"><td><strong>${dateLabel(day.date)}</strong> <span class="text-secondary">${dow}</span>${badge}</td><td>${fmt(day.target)}</td><td>${day.marks.length ? day.marks.map((time) => `<span class="punch">${time}</span>`).join("") : '<span class="text-secondary">—</span>'}</td><td>${isFuture ? "—" : fmt(day.worked)}</td><td class="${!isFuture && !partial ? balanceClass(day.balance) : ""}">${isFuture || partial || day.marks.length === 0 ? "—" : fmt(day.balance)}</td><td class="text-secondary">${escapeHtml(day.note)}</td></tr>`;
+}
+
 function render(data) {
   state = data;
   renderLunchNotice(data.lunch);
@@ -397,25 +417,7 @@ function render(data) {
         )
         .join("")
     : "";
-  $("#days").innerHTML = data.days
-    .map((day) => {
-      const dow = names[new Date(`${day.date}T12:00:00Z`).getUTCDay()];
-      const isFuture = day.date > data.today;
-      const partial =
-        day.date === data.today && day.target > 0 && !day.complete;
-      const badge =
-        day.shiftKind === "duty"
-          ? '<span class="badge  badge-soft mx-3">Plantão</span>'
-          : day.isCompensatoryOff
-            ? '<span class="badge badge-soft mx-3">Folga compensatória</span>'
-            : day.isHoliday
-              ? '<span class="badge badge-soft mx-3">Feriado</span>'
-              : partial
-                ? '<span class="badge badge-soft-dark mx-3">Em aberto</span>'
-                : "";
-      return `<tr data-date="${day.date}" class="${day.date === data.today ? "today" : ""}"><td><strong>${dateLabel(day.date)}</strong> <span class="text-secondary">${dow}</span>${badge}</td><td>${fmt(day.target)}</td><td>${day.marks.length ? day.marks.map((time) => `<span class="punch">${time}</span>`).join("") : '<span class="text-secondary">—</span>'}</td><td>${isFuture ? "—" : fmt(day.worked)}</td><td class="${!isFuture && !partial ? balanceClass(day.balance) : ""}">${isFuture || partial || day.marks.length === 0 ? "—" : fmt(day.balance)}</td><td class="text-secondary">${escapeHtml(day.note)}</td></tr>`;
-    })
-    .join("");
+  $("#days").innerHTML = data.days.map((day) => dayRow(day, data.today)).join("");
   $("#sync-status").textContent = data.sync.lastError
     ? `Acuttis: ${data.sync.lastError}`
     : data.sync.lastSync
@@ -809,6 +811,8 @@ async function initializeApp() {
       return;
     }
     authUsername = auth.user.username;
+    authRole = auth.user.role || '';
+    $('#user-management-wrap').hidden = authRole !== 'superadmin';
     lunchNoticeTemplate = readLunchNotice();
     $("#lunch-notice-template").value = lunchNoticeTemplate;
     const [data, onboarding] = await Promise.all([
@@ -830,12 +834,81 @@ async function initializeApp() {
   }
 }
 
+let detailsTargetId = '';
+$('#open-user-management').addEventListener('click', async () => {
+  $('#user-management-dialog').showModal();
+  const rows = $('#user-management-rows');
+  const status = $('#user-management-status');
+  rows.innerHTML = '<tr><td colspan="4">Carregando usuários…</td></tr>';
+  status.textContent = '';
+  try {
+    const { users } = await api('/api/admin/users');
+    rows.innerHTML = users.map(item => `<tr><th scope="row">${escapeHtml(item.username)}</th><td class="${balanceClass(item.balance)}">${fmt(item.balance)}</td><td><button type="button" class="btn btn-sm btn-outline-primary" data-password-user="${escapeHtml(item.id)}" data-password-name="${escapeHtml(item.username)}">Alterar</button></td><td><button type="button" class="btn btn-sm btn-outline-secondary" data-details-user="${escapeHtml(item.id)}">Ver detalhes</button></td></tr>`).join('') || '<tr><td colspan="4">Nenhum usuário cadastrado.</td></tr>';
+  } catch (error) { rows.innerHTML = ''; status.textContent = error.message; status.className = 'small text-danger'; }
+});
+$('#user-management-close').addEventListener('click', () => $('#user-management-dialog').close());
+async function loadUserDetails() {
+  const month = $('#user-details-month').value;
+  const status = $('#user-details-status');
+  const days = $('#user-details-days');
+  status.textContent = 'Carregando…';
+  status.className = 'small text-secondary';
+  days.innerHTML = '';
+  $('#user-details-summary').innerHTML = '';
+  try {
+    const data = await api(`/api/admin/users/${encodeURIComponent(detailsTargetId)}?month=${encodeURIComponent(month)}`);
+    const s = data.summary;
+    $('#user-details-title').textContent = data.username;
+    $('#user-details-month').value = data.month;
+    $('#user-details-summary').innerHTML =
+      metric('Trabalhado no mês', fmt(s.worked), `Esperado: ${fmt(s.expected)}`) +
+      metric('Saldo do mês', fmt(s.balance), 'Dias fechados', balanceClass(s.balance)) +
+      metric('Banco de horas total', fmt(s.generalBalance + s.balance), 'Saldo acumulado a partir de Outubro/2026', balanceClass(s.generalBalance + s.balance));
+    days.innerHTML = data.days.map(day => dayRow(day, data.today)).join('') || '<tr><td colspan="6" class="text-secondary">Nenhuma batida neste mês.</td></tr>';
+    status.textContent = '';
+  } catch (error) { status.textContent = error.message; status.className = 'small text-danger'; }
+}
+$('#user-details-month').addEventListener('change', loadUserDetails);
+$('#user-details-close').addEventListener('click', () => $('#user-details-dialog').close());
+$('#user-management-rows').addEventListener('click', event => {
+  const details = event.target.closest('[data-details-user]');
+  if (details) {
+    detailsTargetId = details.dataset.detailsUser;
+    $('#user-details-title').textContent = '';
+    $('#user-details-month').value = new Date().toLocaleDateString('sv-SE').slice(0, 7);
+    $('#user-details-dialog').showModal();
+    loadUserDetails();
+    return;
+  }
+  const button = event.target.closest('[data-password-user]');
+  if (!button) return;
+  passwordTargetId = button.dataset.passwordUser;
+  $('#user-password-label').textContent = `Defina uma nova senha para ${button.dataset.passwordName}.`;
+  $('#user-new-password').value = '';
+  $('#user-password-error').hidden = true;
+  $('#user-password-dialog').showModal();
+});
+$('#user-password-close').addEventListener('click', () => $('#user-password-dialog').close());
+$('#user-password-cancel').addEventListener('click', () => $('#user-password-dialog').close());
+$('#user-password-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const errorBox = $('#user-password-error');
+  errorBox.hidden = true;
+  try {
+    await api(`/api/admin/users/${encodeURIComponent(passwordTargetId)}/password`, { method: 'PUT', body: JSON.stringify({ password: $('#user-new-password').value }) });
+    $('#user-password-dialog').close();
+    $('#user-management-status').className = 'small text-success';
+    $('#user-management-status').textContent = 'Senha alterada. As sessões desse usuário foram encerradas.';
+  } catch (error) { errorBox.textContent = error.message; errorBox.hidden = false; }
+});
+
 function updateAuthMode() {
   const registering = authMode === "register";
   $("#auth-submit").textContent = registering ? "Criar conta" : "Entrar";
   $("#auth-toggle-prompt").textContent = registering ? "Já tem conta?" : "Ainda não tem conta?";
   $("#auth-toggle").textContent = registering ? "Entrar" : "Criar conta";
   $("#auth-password").autocomplete = registering ? "new-password" : "current-password";
+  $("#auth-password").minLength = registering ? 12 : 0;
   $("#auth-password-help").hidden = !registering;
   $("#auth-email-group").hidden = !registering;
   $("#auth-email").required = registering;

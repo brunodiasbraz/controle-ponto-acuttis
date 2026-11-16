@@ -29,7 +29,7 @@
             </div>
             <div class="mb-3">
               <label for="auth-password" class="form-label">Senha</label>
-              <input id="auth-password" name="password" class="form-control" type="password" autocomplete="current-password" minlength="12" maxlength="256" required />
+              <input id="auth-password" name="password" class="form-control" type="password" autocomplete="current-password" maxlength="256" required />
               <div id="auth-password-help" class="form-text">Use ao menos 12 caracteres.</div>
             </div>
             <div id="auth-error" class="alert alert-danger mb-3" role="alert" hidden></div>
@@ -131,6 +131,15 @@
           <span id="lunch-notice-text">Almoço, término previsto em breve.</span>
         </div>
         <div class="d-flex gap-2 flex-wrap align-items-center">
+          <span id="user-management-wrap" class="tooltip-wrap" hidden>
+            <button id="open-user-management" class="icon-button" type="button" aria-label="Gestão de usuários">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg></button
+            ><span class="tooltip-text">Gestão de usuários</span>
+          </span>
           <span class="tooltip-wrap">
             <button
               id="open-acuttis"
@@ -312,6 +321,25 @@
         </div>
       </section>
     </main>
+    <dialog id="user-management-dialog" class="day-dialog user-management-dialog">
+      <div class="p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3"><div><div class="eyebrow">ADMINISTRAÇÃO</div><h2 class="h4 mb-0">Gestão de usuários</h2></div><button id="user-management-close" class="btn-close" type="button" aria-label="Fechar"></button></div>
+        <p class="small text-secondary">Saldo acumulado de banco de horas de cada usuário.</p>
+        <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Usuário</th><th>Saldo de horas</th><th>Senha</th><th>Mais informações</th></tr></thead><tbody id="user-management-rows"></tbody></table></div>
+        <div id="user-management-status" class="small" role="status" aria-live="polite"></div>
+      </div>
+    </dialog>
+    <dialog id="user-details-dialog" class="day-dialog user-details-dialog">
+      <div class="p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3 gap-3"><div><div class="eyebrow">DETALHES DO USUÁRIO</div><h2 id="user-details-title" class="h4 mb-0"></h2></div><div class="d-flex align-items-center gap-2"><label for="user-details-month" class="visually-hidden">Mês</label><input id="user-details-month" class="form-control form-control-sm" type="month" /><button id="user-details-close" class="btn-close" type="button" aria-label="Fechar"></button></div></div>
+        <div id="user-details-summary" class="row g-3 mb-3"></div>
+        <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Data</th><th>Meta</th><th>Batidas</th><th>Trabalhado</th><th>Saldo</th><th>Observação</th></tr></thead><tbody id="user-details-days"></tbody></table></div>
+        <div id="user-details-status" class="small" role="status" aria-live="polite"></div>
+      </div>
+    </dialog>
+    <dialog id="user-password-dialog" class="day-dialog">
+      <form id="user-password-form" class="p-4"><div class="d-flex justify-content-between align-items-center mb-3"><h2 class="h5 mb-0">Alterar senha</h2><button id="user-password-close" class="btn-close" type="button" aria-label="Fechar"></button></div><p id="user-password-label" class="small text-secondary"></p><label for="user-new-password" class="form-label">Nova senha</label><input id="user-new-password" class="form-control" type="password" minlength="12" maxlength="256" autocomplete="new-password" required><div class="form-text">Use ao menos 12 caracteres. A sessão ativa do usuário será encerrada.</div><div id="user-password-error" class="small text-danger mt-2" hidden></div><div class="d-flex justify-content-end gap-2 mt-3"><button id="user-password-cancel" class="btn btn-outline-secondary" type="button">Cancelar</button><button class="btn btn-primary" type="submit">Salvar senha</button></div></form>
+    </dialog>
 
     <dialog id="settings-dialog" class="day-dialog">
       <form method="dialog" class="p-4" id="settings">
