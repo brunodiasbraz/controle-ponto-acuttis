@@ -23,15 +23,30 @@
               <label for="auth-username" class="form-label">Nome de usuário</label>
               <input id="auth-username" name="username" class="form-control" type="text" autocomplete="username" minlength="3" maxlength="32" required />
             </div>
+            <div id="auth-email-group" class="mb-3" hidden>
+              <label for="auth-email" class="form-label">Email para recuperação</label>
+              <input id="auth-email" class="form-control" type="email" autocomplete="email" maxlength="254" />
+            </div>
             <div class="mb-3">
               <label for="auth-password" class="form-label">Senha</label>
-              <input id="auth-password" name="password" class="form-control" type="password" autocomplete="current-password" minlength="12" maxlength="256" required />
+              <input id="auth-password" name="password" class="form-control" type="password" autocomplete="current-password" maxlength="256" required />
               <div id="auth-password-help" class="form-text">Use ao menos 12 caracteres.</div>
             </div>
             <div id="auth-error" class="alert alert-danger mb-3" role="alert" hidden></div>
             <button id="auth-submit" type="submit" class="btn btn-primary w-100">Entrar</button>
           </form>
           <p class="small text-secondary text-center mt-3 mb-0"><span id="auth-toggle-prompt">Ainda não tem conta?</span> <button id="auth-toggle" type="button" class="btn btn-link btn-sm p-0 align-baseline">Criar conta</button></p>
+          <button id="forgot-password" type="button" class="btn btn-link btn-sm d-block mx-auto mt-2">Esqueci minha senha</button>
+          <form id="recovery-form" class="mt-3" hidden>
+            <h2 class="h6">Recuperar senha</h2>
+            <p class="small text-secondary">Informe seu email para receber um código válido por 15 minutos.</p>
+            <label for="recovery-email" class="form-label">Email</label><input id="recovery-email" class="form-control mb-2" type="email" autocomplete="email" required />
+            <div id="recovery-code-group" hidden><label for="recovery-code" class="form-label">Código recebido</label><input id="recovery-code" class="form-control mb-2" inputmode="numeric" maxlength="6" autocomplete="one-time-code" /><label for="recovery-password" class="form-label">Nova senha</label><input id="recovery-password" class="form-control mb-2" type="password" minlength="12" maxlength="256" autocomplete="new-password" /></div>
+            <div id="recovery-error" class="small text-danger mb-2" hidden></div>
+            <button id="recovery-submit" class="btn btn-primary w-100" type="submit">Enviar código</button>
+            <button id="recovery-resend" class="btn btn-link btn-sm w-100" type="button" hidden>Reenviar código</button>
+            <button id="recovery-cancel" class="btn btn-link btn-sm w-100" type="button">Voltar ao login</button>
+          </form>
         </div>
       </div>
     </section>
@@ -116,6 +131,15 @@
           <span id="lunch-notice-text">Almoço, término previsto em breve.</span>
         </div>
         <div class="d-flex gap-2 flex-wrap align-items-center">
+          <span id="user-management-wrap" class="tooltip-wrap" hidden>
+            <button id="open-user-management" class="icon-button" type="button" aria-label="Gestão de usuários">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg></button
+            ><span class="tooltip-text">Gestão de usuários</span>
+          </span>
           <span class="tooltip-wrap">
             <button
               id="open-acuttis"
@@ -297,6 +321,25 @@
         </div>
       </section>
     </main>
+    <dialog id="user-management-dialog" class="day-dialog user-management-dialog">
+      <div class="p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3"><div><div class="eyebrow">ADMINISTRAÇÃO</div><h2 class="h4 mb-0">Gestão de usuários</h2></div><button id="user-management-close" class="btn-close" type="button" aria-label="Fechar"></button></div>
+        <p class="small text-secondary">Saldo acumulado de banco de horas de cada usuário.</p>
+        <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Usuário</th><th>Saldo de horas</th><th>Senha</th><th>Mais informações</th></tr></thead><tbody id="user-management-rows"></tbody></table></div>
+        <div id="user-management-status" class="small" role="status" aria-live="polite"></div>
+      </div>
+    </dialog>
+    <dialog id="user-details-dialog" class="day-dialog user-details-dialog">
+      <div class="p-4">
+        <div class="d-flex justify-content-between align-items-center mb-3 gap-3"><div><div class="eyebrow">DETALHES DO USUÁRIO</div><h2 id="user-details-title" class="h4 mb-0"></h2></div><div class="d-flex align-items-center gap-2"><label for="user-details-month" class="visually-hidden">Mês</label><input id="user-details-month" class="form-control form-control-sm" type="month" /><button id="user-details-close" class="btn-close" type="button" aria-label="Fechar"></button></div></div>
+        <div id="user-details-summary" class="row g-3 mb-3"></div>
+        <div class="table-responsive"><table class="table align-middle"><thead><tr><th>Data</th><th>Meta</th><th>Batidas</th><th>Trabalhado</th><th>Saldo</th><th>Observação</th></tr></thead><tbody id="user-details-days"></tbody></table></div>
+        <div id="user-details-status" class="small" role="status" aria-live="polite"></div>
+      </div>
+    </dialog>
+    <dialog id="user-password-dialog" class="day-dialog">
+      <form id="user-password-form" class="p-4"><div class="d-flex justify-content-between align-items-center mb-3"><h2 class="h5 mb-0">Alterar senha</h2><button id="user-password-close" class="btn-close" type="button" aria-label="Fechar"></button></div><p id="user-password-label" class="small text-secondary"></p><label for="user-new-password" class="form-label">Nova senha</label><input id="user-new-password" class="form-control" type="password" minlength="12" maxlength="256" autocomplete="new-password" required><div class="form-text">Use ao menos 12 caracteres. A sessão ativa do usuário será encerrada.</div><div id="user-password-error" class="small text-danger mt-2" hidden></div><div class="d-flex justify-content-end gap-2 mt-3"><button id="user-password-cancel" class="btn btn-outline-secondary" type="button">Cancelar</button><button class="btn btn-primary" type="submit">Salvar senha</button></div></form>
+    </dialog>
 
     <dialog id="settings-dialog" class="day-dialog">
       <form method="dialog" class="p-4" id="settings">
@@ -355,8 +398,8 @@
         <section id="panel-notices" class="settings-panel" role="tabpanel" aria-labelledby="tab-notices" hidden>
           <div class="mb-3 mt-3">
             <label for="lunch-notice-template" class="form-label">Mensagem durante o intervalo</label>
-            <input id="lunch-notice-template" class="form-control" type="text" maxlength="140" autocomplete="off" />
-            <div class="form-text">Use <code>{tempo}</code> para o tempo restante e <code>{horario}</code> para a hora prevista de término. Salvo automaticamente neste navegador.</div>
+            <textarea id="lunch-notice-template" class="form-control font-monospace" rows="7" maxlength="5000" spellcheck="false"></textarea>
+            <div class="form-text">Personalize com HTML. Use <code>{tempo}</code> para o tempo restante e <code>{horario}</code> para a hora prevista. Scripts, formulários e links perigosos são removidos. Salvo automaticamente neste navegador.</div>
           </div>
         </section>
         <section id="panel-acuttis" class="settings-panel" role="tabpanel" aria-labelledby="tab-acuttis" hidden>
@@ -368,6 +411,12 @@
           <div class="mt-3">
             <div class="metric-label">Usuário conectado</div>
             <div id="account-username" class="fw-semibold mt-1"></div>
+          </div>
+          <div id="account-email-alert" class="alert alert-info mt-3" role="status" hidden>Você ainda não tem um email cadastrado. Adicione um email válido para recuperar sua senha caso necessário.</div>
+          <div class="mt-3">
+            <label for="account-email" class="form-label">Email da conta</label>
+            <div class="input-group"><input id="account-email" class="form-control" type="email" autocomplete="email" maxlength="254" required><button id="account-email-save" class="btn btn-outline-primary" type="button">Salvar email</button></div>
+            <div id="account-email-status" class="form-text" aria-live="polite"></div>
           </div>
           <div class="border-top mt-4 pt-3">
             <p class="small text-secondary">Encerre sua sessão neste dispositivo.</p>
@@ -471,6 +520,21 @@
         <div class="d-flex gap-2 mt-3">
           <button id="save-day-off" type="button" class="btn btn-primary">Registrar folga</button>
           <button class="btn btn-outline-secondary" type="button" data-close-dialog="day-off-dialog">Cancelar</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="lunch-dialog" class="day-dialog">
+      <form method="dialog" class="p-4 text-center">
+        <div class="d-flex justify-content-end"><button class="btn-close" type="button" data-close-dialog="lunch-dialog" aria-label="Fechar"></button></div>
+        <div class="eyebrow">INTERVALO DE ALMOÇO</div>
+        <div class="d-flex justify-content-center align-items-center gap-4 my-3">
+          <div><div class="small text-secondary">Tempo restante</div><div id="lunch-live-clock" class="display-5 fw-semibold">--:--:--</div></div>
+          <div class="border-start ps-4"><div class="small text-secondary">Término previsto</div><div id="lunch-finish-time" class="display-5 fw-semibold">--:--</div></div>
+        </div>
+        <p id="lunch-live-message" class="mt-3 mb-0"></p>
+        <div class="d-flex justify-content-center gap-2 mt-4">
+          <button id="lunch-alarm-toggle" class="btn btn-outline-secondary" type="button" aria-pressed="false">Não tocar alarme</button>
+          <button class="btn btn-primary" type="button" data-close-dialog="lunch-dialog">Fechar</button>
         </div>
       </form>
     </dialog>

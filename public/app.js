@@ -2,6 +2,8 @@ const $ = (selector) => document.querySelector(selector);
 let state;
 let selectedDate;
 let authUsername = "";
+let authRole = "";
+let passwordTargetId = "";
 let authMode = "login";
 let scheduleCatalog = [];
 const names = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
@@ -55,19 +57,101 @@ $("#month").value = today.slice(0, 7);
 const appearanceKey = "controle-ponto.appearance";
 const defaultAppearance = { theme: "system", primary: "#2267a5" };
 const lunchNoticeKey = () => `controle-ponto.lunch-notice.${encodeURIComponent(authUsername.toLowerCase())}`;
-const defaultLunchNotice = "Almoço! Término em {tempo} (às {horario})";
+const defaultLunchNotice = "<strong>Almoço!</strong> Término em {tempo} (às {horario})";
 function readLunchNotice() {
   try { return localStorage.getItem(lunchNoticeKey())?.trim() || defaultLunchNotice; }
   catch { return defaultLunchNotice; }
 }
 let lunchNoticeTemplate = readLunchNotice();
+let lunchAlarmTimer = null;
+let lunchAlarmContext = null;
+let lunchAlarmFinishedAt = null;
+const lunchAlarmPreferenceKey = "controle-ponto.lunch-alarm-enabled";
+let lunchAlarmEnabled = localStorage.getItem(lunchAlarmPreferenceKey) !== "false";
+function updateLunchAlarmButton() {
+  const button = $("#lunch-alarm-toggle");
+  button.textContent = lunchAlarmEnabled ? "Alarme ativo" : "Alarme desativado";
+  button.setAttribute("aria-pressed", String(!lunchAlarmEnabled));
+}
+function stopLunchAlarm() {
+  if (lunchAlarmTimer) clearInterval(lunchAlarmTimer);
+  lunchAlarmTimer = null;
+  if (lunchAlarmContext) {
+    lunchAlarmContext.close().catch(() => {});
+    lunchAlarmContext = null;
+  }
+}
+function playLunchAlarm(finishAt) {
+  if (!lunchAlarmEnabled || lunchAlarmFinishedAt === finishAt) return;
+  lunchAlarmFinishedAt = finishAt;
+  stopLunchAlarm();
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+  try {
+    lunchAlarmContext = new AudioContextClass();
+    const context = lunchAlarmContext;
+    const beep = () => {
+      if (context.state !== "running") return;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.16, context.currentTime + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.32);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.33);
+    };
+    context.resume().then(() => {
+      if (lunchAlarmContext !== context) return;
+      beep();
+      lunchAlarmTimer = setInterval(beep, 1600);
+    }).catch(() => {});
+  } catch { stopLunchAlarm(); }
+}
 function saveLunchNotice(value) {
-  const trimmed = value.trim().slice(0, 140);
+  const trimmed = value.trim().slice(0, 5000);
   lunchNoticeTemplate = trimmed || defaultLunchNotice;
   try {
     if (trimmed) localStorage.setItem(lunchNoticeKey(), trimmed);
     else localStorage.removeItem(lunchNoticeKey());
   } catch {}
+}
+function renderLunchNoticeHtml(template, countdown, finishClock) {
+  const source = template
+    .replaceAll("{tempo}", escapeHtml(countdown))
+    .replaceAll("{horario}", escapeHtml(finishClock));
+  const container = document.createElement("div");
+  container.innerHTML = source;
+  const allowedTags = new Set(["A", "B", "BR", "CODE", "DIV", "EM", "H1", "H2", "H3", "I", "IMG", "LI", "OL", "P", "S", "SMALL", "SPAN", "STRONG", "U", "UL"]);
+  const allowedStyles = new Set(["color", "background-color", "font-size", "font-weight", "font-style", "text-align", "text-decoration", "margin", "padding", "border", "border-radius"]);
+  const clean = (parent) => {
+    for (const node of [...parent.childNodes]) {
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      if (!allowedTags.has(node.tagName)) {
+        if (["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "SVG", "MATH", "FORM"].includes(node.tagName)) node.remove();
+        else { node.replaceWith(...node.childNodes); }
+        continue;
+      }
+      for (const attr of [...node.attributes]) {
+        if (attr.name === "style") {
+          const styles = [...node.style].filter(name => allowedStyles.has(name)).map(name => `${name}: ${node.style.getPropertyValue(name)}`).join("; ");
+          if (styles) node.setAttribute("style", styles); else node.removeAttribute("style");
+        } else if (node.tagName === "A" && attr.name === "href") {
+          try { const url = new URL(attr.value, location.href); if (!["http:", "https:", "mailto:"].includes(url.protocol)) node.removeAttribute(attr.name); }
+          catch { node.removeAttribute(attr.name); }
+        } else if (node.tagName === "IMG" && ["src", "alt", "width", "height"].includes(attr.name)) {
+          if (attr.name === "src") { try { if (new URL(attr.value, location.href).protocol !== "https:") node.removeAttribute(attr.name); } catch { node.removeAttribute(attr.name); } }
+        } else if (attr.name !== "title") node.removeAttribute(attr.name);
+      }
+      if (node.tagName === "A") node.setAttribute("rel", "noopener noreferrer");
+      clean(node);
+    }
+  };
+  clean(container);
+  return container;
 }
 function readAppearance() {
   try {
@@ -217,7 +301,7 @@ function todayProjection(item) {
 function renderLunchNotice(lunch) {
   const lunchNotice = $("#lunch-notice");
   const isLunch = lunch?.marks.length === 2;
-  lunchNotice.classList.toggle("d-none", !isLunch);
+  lunchNotice.classList.add("d-none");
   if (isLunch) {
     const [hour, minute] = lunch.marks[1].split(":").map(Number);
     const finishAt = hour * 60 + minute + (lunch.breakMinutes ?? 60);
@@ -225,22 +309,69 @@ function renderLunchNotice(lunch) {
       timeZone: "America/Sao_Paulo",
       hour: "2-digit",
       minute: "2-digit",
+      second: "2-digit",
       hourCycle: "h23",
     }).formatToParts(new Date());
     const currentMinutes = Number(currentParts.find(part => part.type === "hour").value) * 60
       + Number(currentParts.find(part => part.type === "minute").value);
-    const remaining = Math.max(0, finishAt - currentMinutes);
-    const remainingHours = Math.floor(remaining / 60);
-    const remainingMinutes = remaining % 60;
-    const countdown = remainingHours
-      ? `${remainingHours}h${remainingMinutes ? ` ${remainingMinutes}min` : ""}`
-      : `${remainingMinutes} min`;
+    const currentSeconds = Number(currentParts.find(part => part.type === "second").value);
+    const remainingSeconds = Math.max(0, finishAt * 60 - (currentMinutes * 60 + currentSeconds));
+    if (remainingSeconds === 0) playLunchAlarm(finishAt);
+    else if (lunchAlarmFinishedAt !== null && lunchAlarmFinishedAt !== finishAt) {
+      stopLunchAlarm();
+      lunchAlarmFinishedAt = null;
+    }
+    const remainingHours = Math.floor(remainingSeconds / 3600);
+    const remainingMinutes = Math.floor((remainingSeconds % 3600) / 60);
+    const remainingRemainder = remainingSeconds % 60;
+    const countdown = `${String(remainingHours).padStart(2, "0")}:${String(remainingMinutes).padStart(2, "0")}:${String(remainingRemainder).padStart(2, "0")}`;
     const finishClock = `${String(Math.floor((finishAt % 1440) / 60)).padStart(2, "0")}:${String(finishAt % 60).padStart(2, "0")}`;
-    $("#lunch-notice-text").textContent = lunchNoticeTemplate
-      .replaceAll("{tempo}", countdown)
-      .replaceAll("{horario}", finishClock);
+    $("#lunch-live-clock").textContent = countdown;
+    $("#lunch-finish-time").textContent = finishClock;
+    const message = $("#lunch-live-message");
+    message.replaceChildren(...renderLunchNoticeHtml(lunchNoticeTemplate, countdown, finishClock).childNodes);
+    if (!$("#lunch-dialog").open && !window.lunchDialogShown) { $("#lunch-dialog").showModal(); window.lunchDialogShown = true; }
+  } else {
+    stopLunchAlarm();
+    lunchAlarmFinishedAt = null;
+    window.lunchDialogShown = false;
   }
 }
+updateLunchAlarmButton();
+$("#lunch-alarm-toggle").addEventListener("click", () => {
+  lunchAlarmEnabled = !lunchAlarmEnabled;
+  localStorage.setItem(lunchAlarmPreferenceKey, String(lunchAlarmEnabled));
+  updateLunchAlarmButton();
+  if (lunchAlarmEnabled) {
+    lunchAlarmFinishedAt = null;
+    const [hour, minute] = state.lunch.marks[1].split(":").map(Number);
+    const finishAt = hour * 60 + minute + (state.lunch.breakMinutes ?? 60);
+    const now = new Intl.DateTimeFormat("en-GB", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date());
+    const nowSeconds = (Number(now.find(part => part.type === "hour").value) * 60 + Number(now.find(part => part.type === "minute").value)) * 60 + Number(now.find(part => part.type === "second").value);
+    if (finishAt * 60 <= nowSeconds) playLunchAlarm(finishAt);
+  } else stopLunchAlarm();
+});
+$("#lunch-dialog").addEventListener("close", stopLunchAlarm);
+document.querySelectorAll('[data-close-dialog="lunch-dialog"]').forEach(button => button.addEventListener("click", stopLunchAlarm));
+setInterval(() => { if (state?.lunch?.marks.length === 2) renderLunchNotice(state.lunch); }, 1000);
+function dayRow(day, today) {
+      const dow = names[new Date(`${day.date}T12:00:00Z`).getUTCDay()];
+      const isFuture = day.date > today;
+      const partial =
+        day.date === today && day.target > 0 && !day.complete;
+      const badge =
+        day.shiftKind === "duty"
+          ? '<span class="badge  badge-soft mx-3">Plantão</span>'
+          : day.isCompensatoryOff
+            ? '<span class="badge badge-soft mx-3">Folga compensatória</span>'
+            : day.isHoliday
+              ? '<span class="badge badge-soft mx-3">Feriado</span>'
+              : partial
+                ? '<span class="badge badge-soft-dark mx-3">Em aberto</span>'
+                : "";
+      return `<tr data-date="${day.date}" class="${day.date === today ? "today" : ""}"><td><strong>${dateLabel(day.date)}</strong> <span class="text-secondary">${dow}</span>${badge}</td><td>${fmt(day.target)}</td><td>${day.marks.length ? day.marks.map((time) => `<span class="punch">${time}</span>`).join("") : '<span class="text-secondary">—</span>'}</td><td>${isFuture ? "—" : fmt(day.worked)}</td><td class="${!isFuture && !partial ? balanceClass(day.balance) : ""}">${isFuture || partial || day.marks.length === 0 ? "—" : fmt(day.balance)}</td><td class="text-secondary">${escapeHtml(day.note)}</td></tr>`;
+}
+
 function render(data) {
   state = data;
   renderLunchNotice(data.lunch);
@@ -257,25 +388,19 @@ function render(data) {
       `${s.markCount} batimentos importados`,
     ) +
     metric(
-      "Saldo da semana",
-      fmt(s.weekBalance),
-      "Apenas dias fechados",
-      balanceClass(s.weekBalance),
-    ) +
-    metric(
       "Saldo do mês",
       fmt(s.balance),
       s.missingDates.length
         ? `${s.missingDates.length} dia(s) com marcações incompletas`
         : "Apenas dias fechados",
       balanceClass(s.balance),
-    );
+    ) + metric("Banco de horas total", fmt(s.generalBalance + s.balance), "Saldo acumulado a partir de Outubro/2026", balanceClass(s.generalBalance + s.balance));
   $("#projections").innerHTML =
     todayProjection(data.projections.today) +
     projection(
       "Saída na sexta-feira",
       data.projections.friday,
-      "Zerar saldo da semana",
+      "Compensar banco do mês",
       true,
     ) +
     projection(
@@ -292,25 +417,7 @@ function render(data) {
         )
         .join("")
     : "";
-  $("#days").innerHTML = data.days
-    .map((day) => {
-      const dow = names[new Date(`${day.date}T12:00:00Z`).getUTCDay()];
-      const isFuture = day.date > data.today;
-      const partial =
-        day.date === data.today && day.target > 0 && !day.complete;
-      const badge =
-        day.shiftKind === "duty"
-          ? '<span class="badge  badge-soft mx-3">Plantão</span>'
-          : day.isCompensatoryOff
-            ? '<span class="badge badge-soft mx-3">Folga compensatória</span>'
-            : day.isHoliday
-              ? '<span class="badge badge-soft mx-3">Feriado</span>'
-              : partial
-                ? '<span class="badge badge-soft-dark mx-3">Em aberto</span>'
-                : "";
-      return `<tr data-date="${day.date}" class="${day.date === data.today ? "today" : ""}"><td><strong>${dateLabel(day.date)}</strong> <span class="text-secondary">${dow}</span>${badge}</td><td>${fmt(day.target)}</td><td>${day.marks.length ? day.marks.map((time) => `<span class="punch">${time}</span>`).join("") : '<span class="text-secondary">—</span>'}</td><td>${isFuture ? "—" : fmt(day.worked)}</td><td class="${!isFuture && !partial ? balanceClass(day.balance) : ""}">${isFuture || partial || day.marks.length === 0 ? "—" : fmt(day.balance)}</td><td class="text-secondary">${escapeHtml(day.note)}</td></tr>`;
-    })
-    .join("");
+  $("#days").innerHTML = data.days.map((day) => dayRow(day, data.today)).join("");
   $("#sync-status").textContent = data.sync.lastError
     ? `Acuttis: ${data.sync.lastError}`
     : data.sync.lastSync
@@ -374,7 +481,24 @@ $("#tab-appearance").addEventListener("click", () =>
 );
 $("#tab-notices").addEventListener("click", () => selectSettingsTab("notices"));
 $("#tab-acuttis").addEventListener("click", () => selectSettingsTab("acuttis"));
-$("#tab-account").addEventListener("click", () => selectSettingsTab("account"));
+async function loadAccountEmail() {
+  const result = await api('/api/account/email');
+  $('#account-email').value = result.email;
+  $('#account-email-alert').hidden = !!result.email;
+  $('#account-email-status').textContent = result.email ? 'Email cadastrado para recuperação de senha.' : '';
+}
+$('#tab-account').addEventListener('click', () => {
+  selectSettingsTab('account');
+  loadAccountEmail().catch(error => message(error.message, 'danger'));
+});
+$('#account-email-save').addEventListener('click', event => action(event.currentTarget, async () => {
+  const email = $('#account-email').value.trim();
+  const result = await api('/api/account/email', { method:'PUT', body:JSON.stringify({email}) });
+  $('#account-email').value = result.email;
+  $('#account-email-alert').hidden = true;
+  $('#account-email-status').textContent = 'Email salvo para recuperação de senha.';
+  message('Email da conta atualizado.', 'success');
+}));
 $(".settings-tabs").addEventListener("keydown", (event) => {
   const tabs = [$("#tab-work"), $("#tab-appearance"), $("#tab-notices"), $("#tab-acuttis"), $("#tab-account")];
   const current = tabs.indexOf(document.activeElement);
@@ -687,6 +811,8 @@ async function initializeApp() {
       return;
     }
     authUsername = auth.user.username;
+    authRole = auth.user.role || '';
+    $('#user-management-wrap').hidden = authRole !== 'superadmin';
     lunchNoticeTemplate = readLunchNotice();
     $("#lunch-notice-template").value = lunchNoticeTemplate;
     const [data, onboarding] = await Promise.all([
@@ -708,13 +834,85 @@ async function initializeApp() {
   }
 }
 
+let detailsTargetId = '';
+$('#open-user-management').addEventListener('click', async () => {
+  $('#user-management-dialog').showModal();
+  const rows = $('#user-management-rows');
+  const status = $('#user-management-status');
+  rows.innerHTML = '<tr><td colspan="4">Carregando usuários…</td></tr>';
+  status.textContent = '';
+  try {
+    const { users } = await api('/api/admin/users');
+    rows.innerHTML = users.map(item => `<tr><th scope="row">${escapeHtml(item.username)}</th><td class="${balanceClass(item.balance)}">${fmt(item.balance)}</td><td><button type="button" class="btn btn-sm btn-outline-primary" data-password-user="${escapeHtml(item.id)}" data-password-name="${escapeHtml(item.username)}">Alterar</button></td><td><button type="button" class="btn btn-sm btn-outline-secondary" data-details-user="${escapeHtml(item.id)}">Ver detalhes</button></td></tr>`).join('') || '<tr><td colspan="4">Nenhum usuário cadastrado.</td></tr>';
+  } catch (error) { rows.innerHTML = ''; status.textContent = error.message; status.className = 'small text-danger'; }
+});
+$('#user-management-close').addEventListener('click', () => $('#user-management-dialog').close());
+async function loadUserDetails() {
+  const month = $('#user-details-month').value;
+  const status = $('#user-details-status');
+  const days = $('#user-details-days');
+  status.textContent = 'Carregando…';
+  status.className = 'small text-secondary';
+  days.innerHTML = '';
+  $('#user-details-summary').innerHTML = '';
+  try {
+    const data = await api(`/api/admin/users/${encodeURIComponent(detailsTargetId)}?month=${encodeURIComponent(month)}`);
+    const s = data.summary;
+    $('#user-details-title').textContent = data.username;
+    $('#user-details-month').value = data.month;
+    $('#user-details-summary').innerHTML =
+      metric('Trabalhado no mês', fmt(s.worked), `Esperado: ${fmt(s.expected)}`) +
+      metric('Saldo do mês', fmt(s.balance), 'Dias fechados', balanceClass(s.balance)) +
+      metric('Banco de horas total', fmt(s.generalBalance + s.balance), 'Saldo acumulado a partir de Outubro/2026', balanceClass(s.generalBalance + s.balance));
+    days.innerHTML = data.days.map(day => dayRow(day, data.today)).join('') || '<tr><td colspan="6" class="text-secondary">Nenhuma batida neste mês.</td></tr>';
+    status.textContent = '';
+  } catch (error) { status.textContent = error.message; status.className = 'small text-danger'; }
+}
+$('#user-details-month').addEventListener('change', loadUserDetails);
+$('#user-details-close').addEventListener('click', () => $('#user-details-dialog').close());
+$('#user-management-rows').addEventListener('click', event => {
+  const details = event.target.closest('[data-details-user]');
+  if (details) {
+    detailsTargetId = details.dataset.detailsUser;
+    $('#user-details-title').textContent = '';
+    $('#user-details-month').value = new Date().toLocaleDateString('sv-SE').slice(0, 7);
+    $('#user-details-dialog').showModal();
+    loadUserDetails();
+    return;
+  }
+  const button = event.target.closest('[data-password-user]');
+  if (!button) return;
+  passwordTargetId = button.dataset.passwordUser;
+  $('#user-password-label').textContent = `Defina uma nova senha para ${button.dataset.passwordName}.`;
+  $('#user-new-password').value = '';
+  $('#user-password-error').hidden = true;
+  $('#user-password-dialog').showModal();
+});
+$('#user-password-close').addEventListener('click', () => $('#user-password-dialog').close());
+$('#user-password-cancel').addEventListener('click', () => $('#user-password-dialog').close());
+$('#user-password-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const errorBox = $('#user-password-error');
+  errorBox.hidden = true;
+  try {
+    await api(`/api/admin/users/${encodeURIComponent(passwordTargetId)}/password`, { method: 'PUT', body: JSON.stringify({ password: $('#user-new-password').value }) });
+    $('#user-password-dialog').close();
+    $('#user-management-status').className = 'small text-success';
+    $('#user-management-status').textContent = 'Senha alterada. As sessões desse usuário foram encerradas.';
+  } catch (error) { errorBox.textContent = error.message; errorBox.hidden = false; }
+});
+
 function updateAuthMode() {
   const registering = authMode === "register";
   $("#auth-submit").textContent = registering ? "Criar conta" : "Entrar";
   $("#auth-toggle-prompt").textContent = registering ? "Já tem conta?" : "Ainda não tem conta?";
   $("#auth-toggle").textContent = registering ? "Entrar" : "Criar conta";
   $("#auth-password").autocomplete = registering ? "new-password" : "current-password";
+  $("#auth-password").minLength = registering ? 12 : 0;
   $("#auth-password-help").hidden = !registering;
+  $("#auth-email-group").hidden = !registering;
+  $("#auth-email").required = registering;
+  $("#forgot-password").hidden = registering;
   $("#auth-error").hidden = true;
 }
 $("#auth-toggle").addEventListener("click", () => {
@@ -730,7 +928,7 @@ $("#auth-form").addEventListener("submit", async (event) => {
   try {
     await api(`/api/auth/${authMode}`, {
       method: "POST",
-      body: JSON.stringify({ username: $("#auth-username").value.trim(), password: $("#auth-password").value }),
+      body: JSON.stringify({ username: $("#auth-username").value.trim(), email: $("#auth-email").value.trim(), password: $("#auth-password").value }),
     });
     $("#auth-password").value = "";
     $("#auth-screen").hidden = true;
@@ -743,6 +941,26 @@ $("#auth-form").addEventListener("submit", async (event) => {
     button.disabled = false;
   }
 });
+let recoveryRequested = false;
+$("#forgot-password").onclick = () => { $("#auth-form").hidden = true; $("#auth-toggle").parentElement.hidden = true; $("#forgot-password").hidden = true; $("#recovery-form").hidden = false; };
+$("#recovery-cancel").onclick = () => { $("#recovery-form").hidden = true; $("#auth-form").hidden = false; $("#auth-toggle").parentElement.hidden = false; updateAuthMode(); };
+$("#recovery-resend").onclick = async () => {
+  const error = $("#recovery-error"); error.hidden = true;
+  try { await api('/api/auth/forgot', { method:'POST', body:JSON.stringify({email:$("#recovery-email").value.trim()}) }); error.textContent='Se o email estiver cadastrado, enviaremos um novo código válido por 15 minutos.'; error.className='small text-success mb-2'; error.hidden=false; }
+  catch (e) { error.textContent=e.message; error.className='small text-danger mb-2'; error.hidden=false; }
+};
+$("#recovery-form").onsubmit = async event => {
+  event.preventDefault(); const error=$("#recovery-error"), button=$("#recovery-submit"); error.hidden=true; button.disabled=true;
+  try {
+    if (!recoveryRequested) {
+      const result=await api('/api/auth/forgot',{method:'POST',body:JSON.stringify({email:$("#recovery-email").value.trim()})});
+      recoveryRequested=true; $("#recovery-code-group").hidden=false; $("#recovery-code").required=true; $("#recovery-password").required=true; $("#recovery-resend").hidden=false; button.textContent='Redefinir senha'; error.textContent=result.message; error.className='small text-success mb-2'; error.hidden=false;
+    } else {
+      await api('/api/auth/reset',{method:'POST',body:JSON.stringify({email:$("#recovery-email").value.trim(),code:$("#recovery-code").value.trim(),password:$("#recovery-password").value})});
+      recoveryRequested=false; $("#recovery-cancel").click(); message('Senha alterada. Entre com sua nova senha.','success');
+    }
+  } catch(e) { error.textContent=e.message; error.className='small text-danger mb-2'; error.hidden=false; } finally { button.disabled=false; }
+};
 $("#logout").addEventListener("click", async () => {
   try {
     await api("/api/auth/logout", { method: "POST" });
@@ -790,14 +1008,6 @@ $("#welcome-finish").addEventListener("click", async (event) => {
 });
 
 initializeApp();
-setInterval(() => {
-  if (
-    !$("#dashboard-app").hidden &&
-    document.visibilityState === "visible" &&
-    $("#month").value === today.slice(0, 7)
-  )
-    refresh();
-}, 5000);
 
 initScheduleBuilder('welcome'); initScheduleBuilder('settings');
 $('#welcome-new-schedule').addEventListener('click',()=>$('#welcome-schedule-builder').hidden=false);

@@ -4,7 +4,7 @@ import { extname, resolve, sep } from 'node:path';
 import { completeOnboarding, db, deleteCompensatoryDayOff, importMarks, onboardingComplete, saveSetting, setting } from './db.js';
 import { dashboard } from './dashboard.js';
 import { localDate, minutes, shiftTargetForDayOff, weekday } from './calc.js';
-import { authenticate, createSession, deleteSession, getSession, register, sessionMaxAge } from './auth.js';
+import { authenticate, createSession, deleteSession, getSession, register, requestPasswordReset, resetPassword, sessionMaxAge, setUserPassword } from './auth.js';
 import { assignSchedule, createSchedule, getSchedule, scheduleList } from './work-schedules.js';
 import { holidayName } from './holidays.js';
 
@@ -59,7 +59,7 @@ const server = http.createServer(async (req, res) => {
       if (req.method !== 'GET') enforceOrigin(req);
       if (req.method === 'GET' && url.pathname === '/api/auth/status') {
         const user = getSession(requestCookie(req, cookieName));
-        return json(res, 200, { authenticated: !!user, user: user ? { username: user.username } : null });
+        return json(res, 200, { authenticated: !!user, user: user ? { username: user.username, role: user.role } : null });
       }
       if (req.method === 'POST' && ['/api/auth/login', '/api/auth/register'].includes(url.pathname)) {
         const key = rateLimitKey(req);
@@ -68,13 +68,13 @@ const server = http.createServer(async (req, res) => {
         const input = await body(req);
         try {
           const user = url.pathname.endsWith('/register')
-            ? await register(input.username, input.password)
+            ? await register(input.username, input.password, input.email)
             : await authenticate(input.username, input.password);
           if (!user) throw Object.assign(new Error('Usuário ou senha incorretos.'), { status: 401 });
           loginAttempts.delete(key);
           const session = createSession(user.id);
           setSessionCookie(res, session.token);
-          return json(res, url.pathname.endsWith('/register') ? 201 : 200, { authenticated: true, user: { username: user.username } });
+          return json(res, url.pathname.endsWith('/register') ? 201 : 200, { authenticated: true, user: { username: user.username, role: user.role } });
         } catch (error) {
           if (![400, 409].includes(error.status)) {
             attempt.count++;
@@ -84,6 +84,15 @@ const server = http.createServer(async (req, res) => {
           throw error;
         }
       }
+      if (req.method === 'POST' && url.pathname === '/api/auth/forgot') {
+        await requestPasswordReset((await body(req)).email);
+        return json(res, 200, { ok: true, message: 'Se o email estiver cadastrado, enviaremos um código válido por 15 minutos.' });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/auth/reset') {
+        const input = await body(req);
+        await resetPassword(input.email, input.code, input.password);
+        return json(res, 200, { ok: true });
+      }
       if (req.method === 'POST' && url.pathname === '/api/auth/logout') {
         deleteSession(requestCookie(req, cookieName));
         clearSessionCookie(res);
@@ -92,6 +101,48 @@ const server = http.createServer(async (req, res) => {
       const user = getSession(requestCookie(req, cookieName));
       if (!user) return json(res, 401, { error: 'Faça login para continuar.', unauthenticated: true });
       const userId = user.id;
+      if (url.pathname.startsWith('/api/admin/')) {
+        if (user.role !== 'superadmin') return json(res, 403, { error: 'Acesso restrito ao superadministrador.' });
+        if (req.method === 'GET' && url.pathname === '/api/admin/users') {
+          const today = localDate();
+          const month = today.slice(0, 7);
+          const users = db.prepare('SELECT id,username,role FROM users ORDER BY username COLLATE NOCASE').all().map(account => {
+            const data = dashboard(month, today, account.id);
+            return { id: account.id, username: account.username, balance: data.summary.generalBalance + data.summary.balance };
+          });
+          return json(res, 200, { users });
+        }
+        const detailMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
+        if (req.method === 'GET' && detailMatch) {
+          const account = db.prepare('SELECT id,username FROM users WHERE id=?').get(detailMatch[1]);
+          if (!account) return json(res, 404, { error: 'Usuário não encontrado.' });
+          const today = localDate();
+          const requested = url.searchParams.get('month');
+          const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(requested || '') ? requested : today.slice(0, 7);
+          const data = dashboard(month, today, account.id);
+          return json(res, 200, { username: account.username, month, today: data.today, days: data.days, summary: data.summary });
+        }
+        const passwordMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/password$/);
+        if (req.method === 'PUT' && passwordMatch) {
+          const input = await body(req);
+          if (!db.prepare('SELECT id FROM users WHERE id=?').get(passwordMatch[1])) return json(res, 404, { error: 'Usuário não encontrado.' });
+          await setUserPassword(passwordMatch[1], input.password);
+          return json(res, 200, { ok: true });
+        }
+      }
+      if (req.method === 'GET' && url.pathname === '/api/account/email') {
+        const account = db.prepare('SELECT email FROM users WHERE id=?').get(userId);
+        return json(res, 200, { email: account?.email || '' });
+      }
+      if (req.method === 'PUT' && url.pathname === '/api/account/email') {
+        const input = await body(req);
+        const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || email.length > 254)
+          throw Object.assign(new Error('Informe um email válido.'), { status: 400 });
+        try { db.prepare('UPDATE users SET email=? WHERE id=?').run(email, userId); }
+        catch (error) { if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') throw Object.assign(new Error('Esse email já está associado a outra conta.'), { status: 409 }); throw error; }
+        return json(res, 200, { ok: true, email });
+      }
       if (req.method === 'GET' && url.pathname === '/api/work-schedules') return json(res, 200, scheduleList(userId));
       if (req.method === 'POST' && url.pathname === '/api/work-schedules') return json(res, 201, createSchedule(userId, await body(req)));
       if (req.method === 'PUT' && url.pathname === '/api/work-schedules/assign') {

@@ -123,6 +123,9 @@ h1 {
   width: min(95vw, 880px);
   padding: 0;
 }
+#lunch-dialog {
+  border: 1px solid var(--primary-color);
+}
 .day-dialog::backdrop {
   background: #152a3c88;
 }
@@ -172,6 +175,9 @@ h1 {
 .tooltip-wrap {
   position: relative;
   display: inline-flex;
+}
+.tooltip-wrap[hidden] {
+  display: none;
 }
 .tooltip-text {
   position: absolute;
@@ -352,6 +358,8 @@ body{background:var(--surface);color:var(--ink);transition:background-color .2s,
 @keyframes exit-card-pulse{0%{opacity:.85;transform:scale(1)}100%{opacity:0;transform:scale(1.035)}}
 @media(prefers-reduced-motion:reduce){.projection-exit-soon{animation:none}}
 .schedule-summary{font-size:.88rem;color:var(--bs-secondary-color)}
+.user-management-dialog{width:min(1000px,calc(100vw - 2rem));max-width:none}
+.user-details-dialog{width:calc(100vw - 2rem);max-width:none;height:calc(100vh - 2rem);max-height:none}
 .schedule-days{display:grid;gap:.45rem}
 .schedule-day{display:grid;grid-template-columns:minmax(90px,1fr) repeat(4,minmax(78px,.8fr)) minmax(125px,1.2fr) minmax(135px,1.2fr);align-items:center;gap:.4rem;padding:.45rem;border:1px solid var(--bs-border-color);border-radius:.5rem}
 .schedule-day label{margin:0;white-space:nowrap}.schedule-day input[type=checkbox]{accent-color:var(--primary-color)}
