@@ -1,4 +1,4 @@
-import { db, setting } from "./db.js";
+import { query, setting } from "./db.js";
 import { getUserSchedule, scheduleTarget } from './work-schedules.js';
 import { holidayName } from './holidays.js';
 import {
@@ -14,7 +14,7 @@ import {
   weekday,
 } from "./calc.js";
 
-export function dashboard(month, today, userId) {
+export async function dashboard(month, today, userId) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error("Mês inválido.");
   const start = `${month}-01`;
   const end = addDays(
@@ -24,25 +24,34 @@ export function dashboard(month, today, userId) {
     ).getUTCDate() - 1,
   );
 
-  const tolerance = Number(setting(userId, "tolerance_minutes", "10"));
-  const breakMinutes = Number(setting(userId, "break_minutes", "60"));
-  const plannedStart = Number(setting(userId, "planned_start", "480"));
-  const schedule = getUserSchedule(userId);
+  const [toleranceValue, breakValue, plannedStartValue, schedule] = await Promise.all([
+    setting(userId, "tolerance_minutes", "10"),
+    setting(userId, "break_minutes", "60"),
+    setting(userId, "planned_start", "480"),
+    getUserSchedule(userId),
+  ]);
+  const tolerance = Number(toleranceValue);
+  const breakMinutes = Number(breakValue);
+  const plannedStart = Number(plannedStartValue);
   const scheduledDay = date => schedule?.days.find(item => item.weekday === weekday(date));
   const targetForDate = date => holidayName(date) ? 0 : (scheduleTarget(schedule, date) ?? defaultTarget(date));
 
-  const overrides = new Map(
-    db
-      .prepare("SELECT * FROM day_settings WHERE user_id = ? AND date BETWEEN ? AND ?")
-      .all(userId, start, end)
-      .map((row) => [row.date, row]),
-  );
-
-  const shifts = db
-    .prepare(
+  const [overrideRows, shifts, allMarks, todayMarks] = await Promise.all([
+    query("SELECT * FROM day_settings WHERE user_id = ? AND date BETWEEN ? AND ?", [userId, start, end]),
+    query(
       "SELECT id, duty_date, day_off_date, duty_target_minutes FROM shift_provisions WHERE user_id = ? AND ((duty_date BETWEEN ? AND ?) OR (day_off_date BETWEEN ? AND ?)) ORDER BY duty_date",
-    )
-    .all(userId, start, end, start, end);
+      [userId, start, end, start, end],
+    ),
+    query(
+      "SELECT id, mark_datetime, origin FROM marks WHERE user_id = ? AND mark_datetime >= ? AND mark_datetime < ? ORDER BY mark_datetime, id",
+      [userId, `${start} 00:00:00`, `${addDays(end, 1)} 00:00:00`],
+    ),
+    query(
+      "SELECT id, mark_datetime, origin FROM marks WHERE user_id = ? AND mark_datetime >= ? AND mark_datetime < ? ORDER BY mark_datetime, id",
+      [userId, `${today} 00:00:00`, `${addDays(today, 1)} 00:00:00`],
+    ),
+  ]);
+  const overrides = new Map(overrideRows.map((row) => [row.date, row]));
 
   const shiftDays = new Map();
 
@@ -61,16 +70,6 @@ export function dashboard(month, today, userId) {
       note: `Folga do plantão ${shift.duty_date.slice(8, 10)}/${shift.duty_date.slice(5, 7)}`,
     });
   }
-
-  const allMarks = db
-    .prepare(
-      "SELECT id, mark_datetime, origin FROM marks WHERE user_id = ? AND mark_datetime >= ? AND mark_datetime < ? ORDER BY mark_datetime",
-    )
-    .all(userId, `${start} 00:00:00`, `${addDays(end, 1)} 00:00:00`);
-
-  const todayMarks = db
-    .prepare("SELECT id, mark_datetime, origin FROM marks WHERE user_id = ? AND mark_datetime >= ? AND mark_datetime < ? ORDER BY mark_datetime")
-    .all(userId, `${today} 00:00:00`, `${addDays(today, 1)} 00:00:00`);
 
   const byDay = new Map();
 
@@ -130,12 +129,16 @@ export function dashboard(month, today, userId) {
   const sum = (list, key) => list.reduce((total, day) => total + day[key], 0);
 
   const historicalStart = '2000-01-01';
-  const historicRows = db.prepare('SELECT mark_datetime FROM marks WHERE user_id=? AND mark_datetime>=? AND mark_datetime<? ORDER BY mark_datetime').all(userId, `${historicalStart} 00:00:00`, `${start} 00:00:00`);
+  const [historicRows, historicOverrideRows, historicShiftRows] = await Promise.all([
+    query('SELECT mark_datetime FROM marks WHERE user_id=? AND mark_datetime>=? AND mark_datetime<? ORDER BY mark_datetime, id', [userId, `${historicalStart} 00:00:00`, `${start} 00:00:00`]),
+    query('SELECT date,target_minutes,kind FROM day_settings WHERE user_id=? AND date<?', [userId, start]),
+    query('SELECT duty_date,day_off_date,duty_target_minutes FROM shift_provisions WHERE user_id=? AND duty_date<? AND day_off_date<?', [userId, start, start]),
+  ]);
   const historicByDate = new Map();
   for (const mark of historicRows) { const date=mark.mark_datetime.slice(0,10); if(!historicByDate.has(date)) historicByDate.set(date,[]); historicByDate.get(date).push(mark); }
-  const historicOverrides = new Map(db.prepare('SELECT date,target_minutes,kind FROM day_settings WHERE user_id=? AND date<?').all(userId,start).map(row=>[row.date,row]));
+  const historicOverrides = new Map(historicOverrideRows.map(row=>[row.date,row]));
   const historicShifts = new Map();
-  for (const row of db.prepare('SELECT duty_date,day_off_date,duty_target_minutes FROM shift_provisions WHERE user_id=? AND duty_date<? AND day_off_date<?').all(userId,start,start)) {
+  for (const row of historicShiftRows) {
     historicShifts.set(row.duty_date,row.duty_target_minutes); historicShifts.set(row.day_off_date,0);
   }
   const generalBalance = datesBetween(historicalStart, addDays(start,-1)).reduce((total,date)=> {

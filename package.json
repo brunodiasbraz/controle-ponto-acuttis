@@ -13,6 +13,7 @@
     "node": ">=22.9"
   },
   "dependencies": {
+    "mysql2": "^3.24.6",
     "nodemailer": "^10.1.1"
   }
 }

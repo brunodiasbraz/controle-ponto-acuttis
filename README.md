@@ -1,10 +1,10 @@
 # Meu Ponto
 
-Aplicação em Node.js, SQLite, HTML e Bootstrap para acompanhar batimentos, horas trabalhadas, saldo semanal/mensal e saída prevista na sexta ou no último dia útil do mês. Cada conta tem dados isolados.
+Aplicação em Node.js, MariaDB, HTML e Bootstrap para acompanhar batimentos, horas trabalhadas, saldo semanal/mensal e saída prevista na sexta ou no último dia útil do mês. Cada conta tem dados isolados.
 
 ## Rodar
 
-Requer Node.js 22.9 ou superior. A sincronização do Acuttis usa uma extensão do Chrome instalada no computador de cada usuário; o servidor não inicia navegador.
+Requer Node.js 22.9 ou superior e MariaDB 10.3 ou superior. A sincronização do Acuttis usa uma extensão do Chrome instalada no computador de cada usuário; o servidor não inicia navegador.
 
 ```bash
 npm install
@@ -15,13 +15,34 @@ Copie `.env.example` para `.env` para personalizar as variáveis. `npm start`, `
 
 Por padrão, o servidor escuta em todas as interfaces na porta `3000`. Crie uma conta na tela inicial ou entre com uma já existente. O cadastro está aberto a quem acessar a página: qualquer pessoa com o endereço pode criar uma conta. Nomes têm de 3 a 32 caracteres e senhas precisam ter no mínimo 12 caracteres. As senhas são armazenadas como hash scrypt com salt individual, nunca em texto legível.
 
-Em produção, publique atrás de um proxy HTTPS (por exemplo, Nginx ou Caddy) e defina `NODE_ENV=production` e `APP_ORIGIN=https://ponto.seudominio.com`; o primeiro ativa o atributo `Secure` do cookie e o segundo restringe requisições de alteração ao domínio público configurado. O cookie também é `HttpOnly` e `SameSite=Strict`, os tokens de sessão são aleatórios e só seu hash fica no SQLite, e a sessão expira após sete dias. O app adiciona cabeçalhos básicos de segurança. Não exponha o serviço pela internet em HTTP simples.
+Em produção, publique atrás de um proxy HTTPS (por exemplo, Nginx ou Caddy) e defina `NODE_ENV=production` e `APP_ORIGIN=https://ponto.seudominio.com`; o primeiro ativa o atributo `Secure` do cookie e o segundo restringe requisições de alteração ao domínio público configurado. O cookie também é `HttpOnly` e `SameSite=Strict`, os tokens de sessão são aleatórios e só seu hash fica no banco, e a sessão expira após sete dias. O app adiciona cabeçalhos básicos de segurança. Não exponha o serviço pela internet em HTTP simples.
 
-Variáveis: `PORT` (porta), `HOST` (interface; padrão `0.0.0.0`), `DB_PATH` (arquivo SQLite), `APP_ORIGIN` (origem pública HTTPS obrigatória em produção) e `COOKIE_SECURE=true` (para ativar cookie Secure fora de `NODE_ENV=production`).
+Variáveis: `PORT` (porta), `HOST` (interface; padrão `0.0.0.0`), `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` e `DB_NAME` (conexão com o MariaDB), `APP_ORIGIN` (origem pública HTTPS obrigatória em produção) e `COOKIE_SECURE=true` (para ativar cookie Secure fora de `NODE_ENV=production`).
 
-O banco fica em `data/ponto.sqlite` e é ignorado pelo Git. Na primeira conta cadastrada após atualizar uma instalação existente, os dados do banco antigo são migrados para essa conta. Cadastre essa conta antes de divulgar o endereço aos demais usuários.
+## Banco de dados
 
-O SQLite mantém as contas em `users`, as sessões em `user_sessions` e a conclusão individual do primeiro acesso em `user_onboarding`. Marcações, jornada e plantões são sempre consultados com o identificador da conta autenticada.
+Crie o banco e um usuário dedicado no MariaDB e preencha as variáveis `DB_*` no `.env`:
+
+```sql
+CREATE DATABASE ponto CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'ponto'@'localhost' IDENTIFIED BY 'troque-esta-senha';
+GRANT ALL PRIVILEGES ON ponto.* TO 'ponto'@'localhost';
+```
+
+As tabelas são criadas na inicialização (`src/schema.js`). A primeira conta cadastrada vira superadministradora.
+
+### Migrar do SQLite
+
+Versões anteriores usavam SQLite em `data/ponto.sqlite`. Para levar os dados ao MariaDB, pare a aplicação (para não perder batimentos gravados durante a cópia), gere o dump e importe-o no banco vazio:
+
+```bash
+node scripts/sqlite-to-mariadb.js data/ponto.sqlite data/ponto-mariadb.sql
+mysql -u ponto -p ponto < data/ponto-mariadb.sql
+```
+
+O script abre o SQLite só para leitura, recria as tabelas no dump e descarta o que não deve ir para o novo banco: sessões expiradas, códigos de recuperação usados ou expirados, linhas órfãs e valores fora do formato aceito pelo MariaDB. Os ajustes feitos são listados no terminal e no cabeçalho do arquivo gerado.
+
+O banco mantém as contas em `users`, as sessões em `user_sessions` e a conclusão individual do primeiro acesso em `user_onboarding`. Marcações, jornada e plantões são sempre consultados com o identificador da conta autenticada.
 
 O ícone de configurações abre as preferências de jornada e a aba **Aparência**, onde é possível escolher o tema padrão do sistema, claro ou escuro, e definir a cor primária. Essas escolhas são salvas no navegador atual.
 
@@ -64,8 +85,10 @@ As previsões são auxiliares. Para registro oficial, valem os horários e as re
 ## Verificar
 
 ```bash
-npm test
+TEST_DB_NAME=ponto_test TEST_DB_USER=root TEST_DB_PASSWORD=... npm test
 ```
+
+Os testes de banco usam um MariaDB descartável: o banco `TEST_DB_NAME` (que precisa conter "test") é apagado e recriado a cada execução. Também aceitam `TEST_DB_HOST` e `TEST_DB_PORT`. Sem `TEST_DB_NAME`, só os testes de cálculo rodam.
 
 Os testes incluem o exemplo de 01–02/10/2026 da planilha: crédito de 11 minutos em 01/10 e saída prevista às **16:19** em 02/10.
 

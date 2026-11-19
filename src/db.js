@@ -1,177 +1,108 @@
-import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import mysql from 'mysql2/promise';
+import { TABLES } from './schema.js';
 
-const file = resolve(process.env.DB_PATH || 'data/ponto.sqlite');
-mkdirSync(dirname(file), { recursive: true });
-export const db = new DatabaseSync(file);
-db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+const required = name => {
+  const value = process.env[name];
+  if (value === undefined || value === '') throw new Error(`Defina ${name} no ambiente (veja .env.example).`);
+  return value;
+};
 
-function tableExists(name) {
-  return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
-}
-function columns(name) {
-  return tableExists(name) ? db.prepare(`PRAGMA table_info(${name})`).all().map(row => row.name) : [];
-}
-for (const name of ['marks', 'day_settings', 'settings', 'shift_provisions']) {
-  const legacy = `legacy_${name}`;
-  if (tableExists(name) && !columns(name).includes('user_id') && !tableExists(legacy))
-    db.exec(`ALTER TABLE ${name} RENAME TO ${legacy}`);
-}
+export const pool = mysql.createPool({
+  host: process.env.DB_HOST || '127.0.0.1',
+  port: Number(process.env.DB_PORT || 3306),
+  user: required('DB_USER'),
+  password: process.env.DB_PASSWORD || '',
+  database: required('DB_NAME'),
+  charset: 'utf8mb4_unicode_ci',
+  // Datas e horários trafegam como texto ('YYYY-MM-DD' e 'YYYY-MM-DD HH:MM:SS'), como no SQLite.
+  dateStrings: true,
+  timezone: 'Z',
+  connectionLimit: Number(process.env.DB_POOL_SIZE || 10),
+  waitForConnections: true,
+  // Objetos vindos do JSON da requisição viram texto em vez de pares `coluna = valor`.
+  stringifyObjects: true,
+});
+// CURRENT_TIMESTAMP grava em UTC, mantendo o padrão herdado do SQLite.
+pool.on('connection', connection => connection.query("SET time_zone = '+00:00'"));
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    email TEXT COLLATE NOCASE,
-    role TEXT NOT NULL DEFAULT '',
-    password_hash TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS user_sessions (
-    token_hash TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    expires_at INTEGER NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS password_reset_codes (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    code_hash TEXT NOT NULL,
-    expires_at INTEGER NOT NULL,
-    used INTEGER NOT NULL DEFAULT 0 CHECK(used IN (0,1)),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE INDEX IF NOT EXISTS password_reset_expiry_idx ON password_reset_codes(expires_at);
-  CREATE INDEX IF NOT EXISTS user_sessions_expiry_idx ON user_sessions(expires_at);
-  CREATE TABLE IF NOT EXISTS user_onboarding (
-    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    complete INTEGER NOT NULL DEFAULT 0 CHECK(complete IN (0,1)),
-    completed_at TEXT
-  );
-  CREATE TABLE IF NOT EXISTS work_schedules (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
-    is_builtin INTEGER NOT NULL DEFAULT 0 CHECK(is_builtin IN (0,1)),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS work_schedule_days (
-    schedule_id TEXT NOT NULL REFERENCES work_schedules(id) ON DELETE CASCADE,
-    weekday INTEGER NOT NULL CHECK(weekday BETWEEN 0 AND 6),
-    start_minute INTEGER NOT NULL CHECK(start_minute BETWEEN 0 AND 1439),
-    end_minute INTEGER NOT NULL CHECK(end_minute BETWEEN 1 AND 1440),
-    break_minutes INTEGER NOT NULL CHECK(break_minutes BETWEEN 0 AND 240),
-    frequency TEXT NOT NULL DEFAULT 'weekly' CHECK(frequency IN ('weekly','biweekly')),
-    anchor_date TEXT,
-    PRIMARY KEY(schedule_id, weekday),
-    CHECK(end_minute > start_minute),
-    CHECK(break_minutes < end_minute - start_minute),
-    CHECK((frequency='weekly' AND anchor_date IS NULL) OR (frequency='biweekly' AND anchor_date IS NOT NULL))
-  );
-  CREATE TABLE IF NOT EXISTS user_work_schedules (
-    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    schedule_id TEXT NOT NULL REFERENCES work_schedules(id),
-    assigned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS marks (
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    id TEXT NOT NULL,
-    mark_datetime TEXT NOT NULL,
-    timezone TEXT NOT NULL DEFAULT 'America/Sao_Paulo',
-    origin TEXT NOT NULL DEFAULT 'import',
-    PRIMARY KEY(user_id, id)
-  );
-  CREATE INDEX IF NOT EXISTS user_marks_datetime_idx ON marks(user_id, mark_datetime);
-  CREATE TABLE IF NOT EXISTS day_settings (
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    date TEXT NOT NULL,
-    target_minutes INTEGER NOT NULL,
-    note TEXT NOT NULL DEFAULT '',
-    kind TEXT NOT NULL DEFAULT 'adjustment' CHECK(kind IN ('adjustment','compensatory-off')),
-    PRIMARY KEY(user_id, date)
-  );
-  CREATE TABLE IF NOT EXISTS user_settings (
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    key TEXT NOT NULL,
-    value TEXT NOT NULL,
-    PRIMARY KEY(user_id, key)
-  );
-  CREATE TABLE IF NOT EXISTS shift_provisions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    duty_date TEXT NOT NULL,
-    day_off_date TEXT NOT NULL,
-    duty_target_minutes INTEGER NOT NULL CHECK(duty_target_minutes IN (480, 540)),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, duty_date),
-    UNIQUE(user_id, day_off_date)
-  );
-`);
-
-if (!columns('users').includes('email')) db.exec('ALTER TABLE users ADD COLUMN email TEXT COLLATE NOCASE');
-if (!columns('users').includes('role')) db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT ''");
-db.prepare("UPDATE users SET role='superadmin' WHERE id=(SELECT id FROM users ORDER BY created_at,id LIMIT 1) AND NOT EXISTS (SELECT 1 FROM users WHERE role='superadmin')").run();
-db.exec('CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique_idx ON users(email) WHERE email IS NOT NULL');
-
-if (!columns('day_settings').includes('kind'))
-  db.exec("ALTER TABLE day_settings ADD COLUMN kind TEXT NOT NULL DEFAULT 'adjustment'");
-
-db.prepare("INSERT OR IGNORE INTO work_schedules(id,name,is_builtin) VALUES('equipe-dev','Equipe Dev',1)").run();
-const devDay = db.prepare("INSERT OR IGNORE INTO work_schedule_days(schedule_id,weekday,start_minute,end_minute,break_minutes) VALUES('equipe-dev',?,?,?,60)");
-for (const day of [1, 2, 3, 4]) devDay.run(day, 480, 1080);
-devDay.run(5, 480, 1020);
-db.exec("INSERT OR IGNORE INTO user_work_schedules(user_id,schedule_id) SELECT id,'equipe-dev' FROM users");
-// Acuttis login now happens in each user's Chrome profile; discard obsolete server-side credentials.
-db.prepare("DELETE FROM user_settings WHERE key = 'acuttis_credentials_v1'").run();
-
-export function setting(userId, key, fallback) {
-  return db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(userId, key)?.value ?? fallback;
+/** Executa uma consulta e devolve as linhas (SELECT) ou o resultado (INSERT/UPDATE/DELETE). */
+export async function query(sql, params = [], conn = pool) {
+  const [result] = await conn.query(sql, params);
+  return result;
 }
 
-export function saveSetting(userId, key, value) {
-  db.prepare('INSERT INTO user_settings(user_id,key,value) VALUES(?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value').run(userId, key, String(value));
+/** Primeira linha da consulta, ou undefined. */
+export async function one(sql, params = [], conn = pool) {
+  return (await query(sql, params, conn))[0];
 }
 
-export function deleteCompensatoryDayOff(userId, date) {
-  return db.prepare("DELETE FROM day_settings WHERE user_id = ? AND date = ? AND kind = 'compensatory-off'").run(userId, date).changes > 0;
+/** Executa fn(conn) em uma transação; desfaz tudo se fn lançar erro. */
+export async function transaction(fn) {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const result = await fn(conn);
+    await conn.commit();
+    return result;
+  } catch (error) {
+    try { await conn.rollback(); } catch {}
+    throw error;
+  } finally {
+    conn.release();
+  }
 }
 
-export function claimLegacyData(userId) {
-  if (tableExists('legacy_marks')) db.prepare('INSERT OR IGNORE INTO marks(user_id,id,mark_datetime,timezone,origin) SELECT ?,id,mark_datetime,timezone,origin FROM legacy_marks').run(userId);
-  if (tableExists('legacy_day_settings')) db.prepare('INSERT OR IGNORE INTO day_settings(user_id,date,target_minutes,note) SELECT ?,date,target_minutes,note FROM legacy_day_settings').run(userId);
-  if (tableExists('legacy_settings')) db.prepare('INSERT OR IGNORE INTO user_settings(user_id,key,value) SELECT ?,key,value FROM legacy_settings').run(userId);
-  db.prepare("DELETE FROM user_settings WHERE user_id = ? AND key = 'acuttis_credentials_v1'").run(userId);
-  if (tableExists('legacy_settings') && db.prepare("SELECT value FROM legacy_settings WHERE key='onboarding_complete'").get()?.value === '1')
-    db.prepare("INSERT OR IGNORE INTO user_onboarding(user_id,complete,completed_at) VALUES(?,1,CURRENT_TIMESTAMP)").run(userId);
-  if (tableExists('legacy_shift_provisions')) db.prepare('INSERT OR IGNORE INTO shift_provisions(user_id,duty_date,day_off_date,duty_target_minutes,created_at) SELECT ?,duty_date,day_off_date,duty_target_minutes,created_at FROM legacy_shift_provisions').run(userId);
-  for (const name of ['legacy_marks', 'legacy_day_settings', 'legacy_settings', 'legacy_shift_provisions'])
-    db.exec(`DROP TABLE IF EXISTS ${name}`);
+export const isDuplicate = error => error?.code === 'ER_DUP_ENTRY';
+
+async function init() {
+  for (const [, ddl] of TABLES) await query(ddl);
+  const superadmin = await one("SELECT id FROM users WHERE role='superadmin' LIMIT 1");
+  if (!superadmin) {
+    const first = await one('SELECT id FROM users ORDER BY created_at,id LIMIT 1');
+    if (first) await query("UPDATE users SET role='superadmin' WHERE id=?", [first.id]);
+  }
+  await query("INSERT IGNORE INTO work_schedules(id,name,is_builtin) VALUES('equipe-dev','Equipe Dev',1)");
+  const devDays = [1, 2, 3, 4].map(day => ['equipe-dev', day, 480, 1080, 60]);
+  devDays.push(['equipe-dev', 5, 480, 1020, 60]);
+  await query('INSERT IGNORE INTO work_schedule_days(schedule_id,weekday,start_minute,end_minute,break_minutes) VALUES ?', [devDays]);
+  await query("INSERT IGNORE INTO user_work_schedules(user_id,schedule_id) SELECT id,'equipe-dev' FROM users");
+}
+await init();
+
+export async function setting(userId, key, fallback, conn = pool) {
+  return (await one('SELECT value FROM user_settings WHERE user_id = ? AND `key` = ?', [userId, key], conn))?.value ?? fallback;
 }
 
-export function onboardingComplete(userId) {
-  return db.prepare('SELECT complete FROM user_onboarding WHERE user_id = ?').get(userId)?.complete === 1;
+export async function saveSetting(userId, key, value, conn = pool) {
+  await query('INSERT INTO user_settings(user_id,`key`,value) VALUES(?,?,?) ON DUPLICATE KEY UPDATE value=VALUES(value)', [userId, key, String(value)], conn);
 }
 
-export function completeOnboarding(userId) {
-  db.prepare('INSERT INTO user_onboarding(user_id,complete,completed_at) VALUES(?,1,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET complete=1,completed_at=CURRENT_TIMESTAMP').run(userId);
+export async function deleteCompensatoryDayOff(userId, date) {
+  const result = await query("DELETE FROM day_settings WHERE user_id = ? AND date = ? AND kind = 'compensatory-off'", [userId, date]);
+  return result.affectedRows > 0;
 }
 
-export function importMarks(input, userId) {
+export async function onboardingComplete(userId) {
+  return (await one('SELECT complete FROM user_onboarding WHERE user_id = ?', [userId]))?.complete === 1;
+}
+
+export async function completeOnboarding(userId) {
+  await query('INSERT INTO user_onboarding(user_id,complete,completed_at) VALUES(?,1,CURRENT_TIMESTAMP) ON DUPLICATE KEY UPDATE complete=1,completed_at=CURRENT_TIMESTAMP', [userId]);
+}
+
+const MARK_DATETIME = /^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01]) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
+export const validMarkDatetime = value => {
+  const match = MARK_DATETIME.exec(value || '');
+  return !!match && new Date(Date.UTC(+match[1], +match[2] - 1, +match[3])).getUTCDate() === +match[3];
+};
+
+export async function importMarks(input, userId) {
   const marks = Array.isArray(input) ? input : (input?.data?.marks || input?.data?.rows || input?.data || input?.marks || input?.rows || input?.results);
   if (!Array.isArray(marks)) throw new Error('Resposta de batimentos em formato desconhecido.');
-  const insert = db.prepare('INSERT OR IGNORE INTO marks(user_id,id,mark_datetime,timezone,origin) VALUES(?,?,?,?,?)');
-  let added = 0;
-  db.exec('BEGIN');
-  try {
-    for (const mark of marks) {
-      if (typeof mark?._id !== 'string' || !/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(mark.mark_datetime || '')) continue;
-      added += Number(insert.run(userId, mark._id, mark.mark_datetime, mark.timezone || 'America/Sao_Paulo', mark.origin || 'acuttis').changes);
-    }
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-  return { added, received: marks.length };
+  const rows = marks
+    .filter(mark => typeof mark?._id === 'string' && mark._id.length <= 128 && validMarkDatetime(mark.mark_datetime))
+    .map(mark => [userId, mark._id, mark.mark_datetime, String(mark.timezone || 'America/Sao_Paulo').slice(0, 64), String(mark.origin || 'acuttis').slice(0, 32)]);
+  if (!rows.length) return { added: 0, received: marks.length };
+  const result = await query('INSERT IGNORE INTO marks(user_id,id,mark_datetime,timezone,origin) VALUES ?', [rows]);
+  return { added: result.affectedRows, received: marks.length };
 }
